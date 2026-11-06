@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#fef6e4">
   <title>Retos en familia</title>
-  <link rel="stylesheet" href="css/retos.css?v=2">
+  <link rel="stylesheet" href="css/retos.css?v=3">
 </head>
 <body>
 
@@ -21,6 +21,27 @@
 <div id="offline" class="offline" hidden>Sin conexión… reintentando</div>
 
 <main id="app" aria-live="polite"></main>
+
+<!-- Cámara en vivo -->
+<div id="camera" class="camera-ov" hidden>
+  <div class="cam-top"><span id="camTitle"></span><button id="camClose" class="cam-round" aria-label="Cerrar cámara">✕</button></div>
+  <div id="camLive" class="cam-stage">
+    <video id="camVideo" autoplay playsinline muted></video>
+    <p id="camMsg" class="cam-msg" hidden></p>
+    <div class="cam-bar">
+      <span class="cam-side"></span>
+      <button id="camShutter" class="cam-shutter" aria-label="Hacer foto" disabled></button>
+      <button id="camFlip" class="cam-round" aria-label="Cambiar de cámara">🔄</button>
+    </div>
+  </div>
+  <div id="camPreview" class="cam-stage" hidden>
+    <img id="camImg" alt="Foto que acabas de hacer">
+    <div class="cam-bar">
+      <button id="camRetake" class="btn ghost-dark">↺ Repetir</button>
+      <button id="camUse" class="btn primary">✅ Usar foto</button>
+    </div>
+  </div>
+</div>
 
 <!-- Visor de foto -->
 <div id="viewer" class="viewer" hidden>
@@ -46,6 +67,6 @@
 
 <script src="js/vendor/supabase-2.45.4.js"></script>
 <script src="js/retos-config.js?v=2"></script>
-<script src="js/retos.js?v=2"></script>
+<script src="js/retos.js?v=3"></script>
 </body>
 </html>

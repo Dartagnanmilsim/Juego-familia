@@ -6,7 +6,8 @@ en el móvil de todos. Cada uno sale a buscar y hace una foto cada vez que encue
 El primero que llega a la meta cierra el reto y se lleva los puntos.
 
 - El reto lo escribe quien lo crea: cualquier cosa que se pueda fotografiar (perros negros, gente con sombrero, señales de STOP…).
-- Las fotos se hacen con la cámara o se eligen de la galería.
+- Las fotos solo se hacen en el momento con la cámara del propio juego (visor en vivo). No se puede adjuntar nada desde la galería ni desde archivos.
+  La primera vez el móvil pide permiso para usar la cámara: hay que aceptarlo.
 - Se pueden crear jugadores desde la app, y varias personas pueden compartir un mismo móvil cambiando de jugador.
 - Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha, y deja de contar.
 - Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. La clasificación suma todos los retos.
@@ -41,3 +42,4 @@ no necesita Supabase.
 - Versión publicada: https://claude.ai/artifact/P3YSfdmDn2bYVbK7PDKAbr
 - Este archivo es su código fuente. Solo funciona abierto dentro de claude.ai.
 - Para que alguien juegue, comparte el artifact con su correo y permiso de **Editor**.
+- Limitación: dentro de claude.ai la página no puede abrir un visor de cámara propio, así que el móvil decide si ofrece cámara o galería. Para exigir fotos en el momento, usa la versión web.

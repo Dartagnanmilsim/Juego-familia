@@ -715,7 +715,6 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
         '<div class="shoot"><label class="' + (S.busy ? "busy" : "") + '">' +
         '<input type="file" id="shot" accept="image/*" capture="environment" aria-label="Hacer foto">' +
         (S.busy ? "Subiendo foto…" : "📸 Tomar foto") + "</label>" +
-        (S.busy ? "" : '<label class="pick"><input type="file" id="pick" accept="image/*" aria-label="Elegir de la galería">Elegir de la galería</label>') +
         "<p>Haz la foto en cuanto lo veas. Cuenta al instante para todos.</p></div>") +
       "</section>" +
       '<section class="card"><h2>La carrera</h2><ul class="race">' +
@@ -806,7 +805,6 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     document.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
     if (r) {
       if ($("shot")) $("shot").onchange = function () { var f = this.files[0]; this.value = ""; if (f) subirFoto(f); };
-      if ($("pick")) $("pick").onchange = $("shot").onchange;
       if ($("cancelReto")) $("cancelReto").onclick = function () { cancelar(r); };
       return;
     }

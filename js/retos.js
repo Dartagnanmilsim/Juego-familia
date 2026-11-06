@@ -350,10 +350,8 @@
       '<p class="sub">Lo lanzó ' + esc(player(r.creado_por).avatar + " " + player(r.creado_por).nombre) + '</p>' +
       '<div class="clock-wrap">⏱️ <span id="clock"></span></div>' +
       '<div class="mine"><b>' + mine + '</b> / ' + r.meta + '<small>tus fotos</small></div>' +
-      '<label class="btn camera' + (busy ? " busy" : "") + '">' +
-      '<input type="file" id="shot" accept="image/*" capture="environment">' +
-      (busy ? "Subiendo…" : "📸 Tomar foto") + '</label>' +
-      (busy ? "" : '<label class="btn ghost wide gallery-btn"><input type="file" id="pick" accept="image/*">🖼️ Elegir de la galería</label>') +
+      '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
+      '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego.</p>' +
       '<ul class="race">' + rows.map(function (j) {
         var n = c[j.id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
         return '<li' + (j.id === session.jugadorId ? ' class="is-me"' : "") + '>' +
@@ -466,8 +464,7 @@
     bindPlayers();
 
     if (r) {
-      el("shot").onchange = function () { if (this.files[0]) upload(r, this.files[0]); this.value = ""; };
-      if (el("pick")) el("pick").onchange = el("shot").onchange;
+      el("shot").onclick = function () { openCamera(r); };
       if (el("cancel")) el("cancel").onclick = function () {
         if (!confirm("¿Cancelar el reto para todos? No se repartirán puntos.")) return;
         guard(async function () { must(await db.rpc("cancelar_reto", { p_reto: r.id, p_jugador: session.jugadorId })); await reload(); });
@@ -552,28 +549,96 @@
     }
   }
 
-  // Reduce la foto antes de subirla (más rápido con datos móviles)
-  function shrink(file) {
-    return new Promise(function (resolve) {
-      var img = new Image(), url = URL.createObjectURL(file);
-      img.onload = function () {
-        var max = 1280, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
-        var cv = document.createElement("canvas");
-        cv.width = Math.round(w * k); cv.height = Math.round(h * k);
-        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-        URL.revokeObjectURL(url);
-        cv.toBlob(function (b) { resolve(b || file); }, "image/jpeg", 0.82);
-      };
-      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
-      img.src = url;
-    });
+  // ------------------------------------------------------------ cámara en vivo
+  // Las fotos solo se hacen aquí, en el momento: no hay forma de adjuntar archivos.
+  var cam = { stream: null, reto: null, facing: "environment", shot: null };
+
+  function camMsg(text) {
+    el("camMsg").textContent = text || "";
+    el("camMsg").hidden = !text;
   }
 
-  async function upload(r, file) {
+  async function startStream() {
+    if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
+    cam.stream = null;
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      camMsg("Este navegador no deja usar la cámara aquí. Abre el juego en Safari o Chrome desde su enlace https.");
+      return;
+    }
+    try {
+      cam.stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: cam.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
+      var v = el("camVideo");
+      v.srcObject = cam.stream;
+      v.classList.toggle("mirror", cam.facing === "user");
+      await v.play().catch(function () {});
+      camMsg("");
+      el("camShutter").disabled = false;
+    } catch (e) {
+      el("camShutter").disabled = true;
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+        camMsg("No hay permiso para la cámara. Toca el icono «aA» o el candado junto a la dirección, permite la Cámara y vuelve a intentarlo.");
+      } else if (e && (e.name === "NotFoundError" || e.name === "OverconstrainedError")) {
+        camMsg("No se encontró ninguna cámara en este dispositivo.");
+      } else {
+        camMsg("No se pudo abrir la cámara. Cierra otras apps que la estén usando y vuelve a intentarlo.");
+      }
+    }
+  }
+
+  function openCamera(r) {
+    if (busy) return;
+    cam.reto = r; cam.shot = null;
+    el("camPreview").hidden = true; el("camLive").hidden = false;
+    el("camera").hidden = false;
+    el("camTitle").textContent = r.emoji + " " + r.que_buscar;
+    startStream();
+  }
+
+  function closeCamera() {
+    if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
+    cam.stream = null; cam.shot = null;
+    el("camVideo").srcObject = null;
+    el("camera").hidden = true;
+  }
+
+  function takePhoto() {
+    var v = el("camVideo");
+    if (!v.videoWidth) return;
+    var max = 1280, k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight));
+    var cv = document.createElement("canvas");
+    cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+    var g = cv.getContext("2d");
+    if (cam.facing === "user") { g.translate(cv.width, 0); g.scale(-1, 1); }
+    g.drawImage(v, 0, 0, cv.width, cv.height);
+    cv.toBlob(function (b) {
+      if (!b) return;
+      cam.shot = b;
+      el("camImg").src = URL.createObjectURL(b);
+      el("camLive").hidden = true; el("camPreview").hidden = false;
+    }, "image/jpeg", 0.82);
+  }
+
+  el("camShutter").onclick = takePhoto;
+  el("camFlip").onclick = function () { cam.facing = cam.facing === "environment" ? "user" : "environment"; startStream(); };
+  el("camClose").onclick = closeCamera;
+  el("camRetake").onclick = function () {
+    if (el("camImg").src) URL.revokeObjectURL(el("camImg").src);
+    cam.shot = null; el("camPreview").hidden = true; el("camLive").hidden = false;
+  };
+  el("camUse").onclick = function () {
+    var b = cam.shot, r = cam.reto;
+    if (!b || !r) return;
+    closeCamera();
+    upload(r, b);
+  };
+
+  async function upload(r, blob) {
     if (busy) return;
     busy = true; renderFamily();
     try {
-      var blob = await shrink(file);
       var type = blob.type && /^image\/(jpeg|png|webp)$/.test(blob.type) ? blob.type : "image/jpeg";
       var ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
       var ruta = r.familia_id + "/" + r.id + "/" + session.jugadorId + "/" + Date.now() + "." + ext;
