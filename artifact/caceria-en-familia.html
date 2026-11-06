@@ -1,0 +1,834 @@
+<title>Cacería en familia</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700&display=swap">
+<style>
+/* Layout: a single field-notebook column; the live challenge is a big "ticket" with a race board under it. */
+:root {
+  --paper: #eef1ea;      /* field-guide paper, slightly green */
+  --card: #ffffff;
+  --ink: #1b211d;
+  --muted: #5d6a61;
+  --line: #d5dccf;
+  --signal: #ffc23d;     /* hunter's signal yellow */
+  --signal-ink: #3a2a00;
+  --dog: #23262b;        /* the black dog */
+  --good: #2f8f55;
+  --bad: #c2412d;
+  --track: #e2e7dc;
+  --shadow: 0 1px 0 rgba(27, 33, 29, .06), 0 8px 24px -16px rgba(27, 33, 29, .35);
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --body: "Figtree", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --r: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141815; --card: #1d231f; --ink: #edf1ea; --muted: #a2aea5; --line: #2f3832;
+    --signal: #ffcb57; --signal-ink: #2b1f00; --dog: #0b0c0e; --good: #5cc283; --bad: #ff7a63;
+    --track: #2b332d; --shadow: 0 1px 0 rgba(0,0,0,.4), 0 10px 26px -18px rgba(0,0,0,.9);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141815; --card: #1d231f; --ink: #edf1ea; --muted: #a2aea5; --line: #2f3832;
+  --signal: #ffcb57; --signal-ink: #2b1f00; --dog: #0b0c0e; --good: #5cc283; --bad: #ff7a63;
+  --track: #2b332d; --shadow: 0 1px 0 rgba(0,0,0,.4), 0 10px 26px -18px rgba(0,0,0,.9);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--body); font-size: 16px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 40px;
+  -webkit-tap-highlight-color: transparent;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--paper); }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.wrap { max-width: 560px; margin: 0 auto; display: grid; gap: 16px; }
+
+/* Header */
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-block: 14px 12px; background: var(--paper);
+}
+.brand { display: flex; flex-direction: column; min-width: 0; }
+.brand h1 { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1; margin: 0; letter-spacing: -.02em; }
+.brand span { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.mechip {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 6px 12px 6px 6px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); max-width: 50%;
+}
+.mechip b { font-size: 24px; line-height: 1; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--track); }
+.mechip span { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Generic blocks */
+.card { background: var(--card); border-radius: var(--r); padding: 20px; box-shadow: var(--shadow); min-width: 0; }
+.card h2 { font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -.01em; margin: 0 0 12px; text-wrap: balance; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.note { font-size: 14px; color: var(--muted); margin: 0; }
+.notice { border-radius: 14px; padding: 12px 14px; background: var(--card); border: 1px dashed var(--line); font-size: 14px; }
+.notice b { display: block; margin-bottom: 2px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; border-radius: 14px; padding: 13px 18px; font-weight: 700;
+  background: var(--track); color: var(--ink); transition: transform .08s;
+}
+.btn:active { transform: translateY(1px) scale(.99); }
+.btn.go { background: var(--signal); color: var(--signal-ink); }
+.btn.dark { background: var(--dog); color: #fff; }
+.btn.quiet { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+.btn.wide { width: 100%; }
+.btn[disabled] { opacity: .55; pointer-events: none; }
+
+input[type="text"] {
+  width: 100%; min-width: 0; padding: 13px 14px; border-radius: 12px;
+  border: 1.5px solid var(--line); background: var(--paper); font-size: 17px;
+}
+input[type="text"]:focus { outline: none; border-color: var(--signal); }
+.field { display: grid; gap: 8px; }
+.field > label, .field > .lbl { font-size: 14px; font-weight: 600; color: var(--muted); }
+.stack { display: grid; gap: 16px; }
+.row { display: flex; gap: 10px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1.5px solid var(--line); background: var(--card); border-radius: 999px;
+  padding: 8px 13px; font-size: 15px; font-weight: 600;
+}
+.chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+
+.avatars { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 8px; }
+.av { aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 2px solid transparent; background: var(--track); font-size: 26px; }
+.av[aria-pressed="true"] { border-color: var(--ink); background: var(--signal); }
+
+.stepper { display: flex; align-items: center; gap: 14px; }
+.stepper .btn { width: 52px; height: 52px; padding: 0; font-size: 26px; border-radius: 50%; }
+.stepper output { font-family: var(--display); font-weight: 800; font-size: 40px; min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* Live challenge ticket */
+.ticket { background: var(--dog); color: #fff; border-radius: 22px; overflow: hidden; box-shadow: var(--shadow); }
+.ticket-head { padding: 20px 20px 16px; display: grid; gap: 6px; }
+.ticket .eyebrow { color: var(--signal); display: flex; align-items: center; gap: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); animation: blink 1.4s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.ticket h2 { font-family: var(--display); font-weight: 800; font-size: 30px; line-height: 1.05; margin: 2px 0 0; letter-spacing: -.02em; text-wrap: balance; }
+.ticket h2 em { font-style: normal; color: var(--signal); }
+.ticket .by { font-size: 14px; color: #c9cfca; }
+.ticket-stats { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px dashed #4a4f55; }
+.ticket-stats > div { padding: 14px 20px; display: grid; gap: 2px; }
+.ticket-stats > div + div { border-left: 1px dashed #4a4f55; }
+.ticket-stats small { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #aab1ac; font-weight: 700; }
+.ticket-stats strong { font-family: var(--display); font-weight: 800; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.ticket-stats strong.hurry { color: #ff8a73; }
+.ticket-stats strong span { font-size: 18px; color: #aab1ac; }
+.shoot { padding: 0 20px 20px; }
+.shoot label {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 18px; border-radius: 16px;
+  background: var(--signal); color: var(--signal-ink);
+  font-family: var(--display); font-weight: 800; font-size: 22px; cursor: pointer;
+}
+.shoot input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.shoot label.busy { opacity: .6; pointer-events: none; }
+.shoot p { margin: 8px 0 0; font-size: 13px; color: #aab1ac; text-align: center; }
+
+.race { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.race li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.race .face { font-size: 22px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--track); }
+.race .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.race .bar { grid-column: 2; height: 10px; border-radius: 6px; background: var(--track); overflow: hidden; margin-top: 4px; }
+.race .bar i { display: block; height: 100%; background: var(--ink); border-radius: 6px; transition: width .5s; }
+.race li.mine .bar i { background: var(--signal); }
+.race .n { font-variant-numeric: tabular-nums; font-weight: 700; }
+.race .who { min-width: 0; }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
+.ph { position: relative; aspect-ratio: 1; max-width: 100%; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: var(--track); }
+.ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph span { position: absolute; left: 4px; bottom: 4px; font-size: 16px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--card); }
+
+/* Result */
+.result { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
+.trophy { width: 64px; height: 64px; border-radius: 18px; background: var(--signal); display: grid; place-items: center; font-size: 34px; }
+.result h2 { margin: 0; }
+
+/* Ranking */
+.board { list-style: none; margin: 0; padding: 0; display: grid; }
+.board li { display: grid; grid-template-columns: 28px 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.board li:first-child { border-top: 0; }
+.board .pos { font-family: var(--display); font-weight: 800; font-size: 18px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+.board li:first-child .pos { color: var(--ink); }
+.board .face { font-size: 22px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--track); }
+.board .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board .name small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+.board .pts { font-family: var(--display); font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+.board .pts small { font-family: var(--body); font-weight: 600; font-size: 13px; color: var(--muted); }
+.board li.mine .name { text-decoration: underline; text-decoration-color: var(--signal); text-decoration-thickness: 3px; text-underline-offset: 3px; }
+
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.history li:first-child { border-top: 0; }
+.history li > span:first-child { min-width: 0; }
+.history small { display: block; color: var(--muted); font-size: 13px; }
+.history li > span:last-child { text-align: right; flex: none; max-width: 48%; }
+
+.empty { text-align: center; padding: 28px 16px; color: var(--muted); }
+.empty strong { display: block; color: var(--ink); font-family: var(--display); font-size: 20px; margin-bottom: 4px; }
+
+/* Overlays */
+.overlay {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: rgba(10, 12, 11, .72);
+}
+.sheet { width: 100%; max-width: 380px; background: var(--card); color: var(--ink); border-radius: 22px; padding: 24px 20px; display: grid; gap: 14px; text-align: center; }
+.sheet h3 { font-family: var(--display); font-weight: 800; font-size: 24px; margin: 0; text-wrap: balance; }
+.sheet p { margin: 0; color: var(--muted); }
+.sheet .row { justify-content: center; flex-wrap: wrap; }
+.party-mark { font-size: 64px; line-height: 1; }
+.sheet.pop { animation: pop .45s cubic-bezier(.2, 1.5, .5, 1); }
+@keyframes pop { from { transform: scale(.7); opacity: 0; } }
+.viewer img { max-width: 100%; max-height: 66vh; border-radius: 16px; display: block; margin: 0 auto; }
+.viewer-box { display: grid; gap: 12px; justify-items: center; width: 100%; max-width: 560px; }
+.viewer-box p { color: #fff; margin: 0; }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 40;
+  bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  width: max-content; max-width: calc(100vw - 32px);
+  background: var(--ink); color: var(--paper); padding: 12px 16px; border-radius: 14px; font-weight: 600; text-align: center;
+}
+.confetti { position: fixed; top: -40px; z-index: 31; font-size: 28px; pointer-events: none; animation: fall 2.6s ease-in forwards; }
+@keyframes fall { to { transform: translateY(110vh) rotate(500deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .sheet.pop, .confetti { animation: none; }
+  .confetti { display: none; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Cacería en familia</h1>
+      <span>El primero en encontrarlos todos gana</span>
+    </div>
+    <button class="mechip" id="meChip" hidden aria-label="Editar mi perfil"><b id="meFace">🙂</b><span id="meName"></span></button>
+  </header>
+
+  <div id="banner" class="notice" hidden></div>
+  <main id="view" class="stack">
+    <div class="card empty"><strong>Abriendo la cacería…</strong>Conectando con los retos de la familia.</div>
+  </main>
+</div>
+
+<div id="viewer" class="overlay viewer" hidden>
+  <div class="viewer-box">
+    <img id="viewerImg" alt="">
+    <p id="viewerCap"></p>
+    <div class="row">
+      <button class="btn" id="viewerDel" hidden>Borrar mi foto</button>
+      <button class="btn go" id="viewerClose">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="ask" class="overlay" hidden>
+  <div class="sheet">
+    <h3 id="askTitle"></h3>
+    <p id="askText"></p>
+    <div class="row"><button class="btn quiet" id="askNo">No</button><button class="btn go" id="askYes">Sí</button></div>
+  </div>
+</div>
+
+<div id="party" class="overlay" hidden>
+  <div class="sheet pop">
+    <div class="party-mark" id="partyMark">🏆</div>
+    <h3 id="partyTitle"></h3>
+    <p id="partyText"></p>
+    <button class="btn go wide" id="partyClose">¡Vamos!</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var AVATARS = ["👩", "👨", "👧", "👦", "🧒", "👵", "👴", "🧑", "👶", "🦸", "🧙", "🐱", "🐶", "🦊", "🐼", "🦁"];
+  var PRESETS = [
+    { e: "🐕", q: "perros negros" }, { e: "🚗", q: "coches rojos" }, { e: "🐈", q: "gatos" },
+    { e: "🌼", q: "flores amarillas" }, { e: "🚲", q: "bicicletas" }, { e: "🐦", q: "pájaros" }
+  ];
+  var DURS = [
+    { m: 15, l: "15 min" }, { m: 30, l: "30 min" }, { m: 60, l: "1 hora" },
+    { m: 180, l: "3 horas" }, { m: 1440, l: "1 día" }, { m: 10080, l: "1 semana" }
+  ];
+  var POINTS = [3, 2, 1];
+
+  var S = {
+    db: null, user: null, assets: null, uid: null, readOnly: false,
+    jugadores: {}, retos: [], fotos: [], names: {},
+    fotosFor: null, unsubFotos: null,
+    ready: { j: false, r: false }, busy: false, closing: {},
+    editingProfile: false,
+    draft: { e: "🐕", q: "perros negros", meta: 10, min: 60 },
+    profileDraft: null
+  };
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------- small helpers ----------
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function toast(msg, ms) {
+    var t = $("toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, ms || 3200);
+  }
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function fmtLeft(ms) {
+    if (ms <= 0) return "0:00";
+    var s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    var p = function (n) { return n < 10 ? "0" + n : "" + n; };
+    if (d) return d + "d " + h + "h";
+    if (h) return h + ":" + p(m) + ":" + p(x);
+    return m + ":" + p(x);
+  }
+  function fmtDate(t) {
+    try { return new Date(t).toLocaleString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+    catch (e) { return ""; }
+  }
+  function ask(title, text, yes) {
+    return new Promise(function (res) {
+      $("askTitle").textContent = title; $("askText").textContent = text; $("askYes").textContent = yes || "Sí";
+      $("ask").hidden = false;
+      function done(v) { $("ask").hidden = true; $("askYes").onclick = $("askNo").onclick = null; res(v); }
+      $("askYes").onclick = function () { done(true); };
+      $("askNo").onclick = function () { done(false); };
+    });
+  }
+  function errText(e) {
+    var c = e && e.code;
+    if (c === "quota_exceeded" || c === "quota_or_state") return "Se llenó el espacio de la cacería. Borrad retos o fotos antiguas.";
+    if (c === "too_large") return "La foto es demasiado grande.";
+    if (c === "rate_limited" || c === "resource_exhausted") return "Demasiado rápido. Espera un momento y vuelve a intentarlo.";
+    if (c === "invalid_argument" && S.readOnly) return "Solo puedes mirar: pide permiso de Editor para jugar.";
+    return (e && e.message) || "No se pudo guardar. Revisa la conexión e inténtalo otra vez.";
+  }
+
+  // ---------- people ----------
+  function person(id) {
+    var j = S.jugadores[id] || {};
+    return { face: j.avatar || "🙂", name: j.apodo || S.names[id] || "Jugador" };
+  }
+  function refreshNames() {
+    if (!S.user) return;
+    var ids = Object.keys(S.jugadores);
+    S.retos.forEach(function (r) { if (r.creador) ids.push(r.creador); if (r.ganador) ids.push(r.ganador); });
+    if (!ids.length) return;
+    S.user.profiles(ids).then(function (ps) {
+      var changed = false;
+      Object.keys(ps).forEach(function (id) { if (S.names[id] !== ps[id].name) { S.names[id] = ps[id].name; changed = true; } });
+      if (changed) render();
+    });
+  }
+
+  // ---------- derived state ----------
+  function activeReto() { return S.retos.filter(function (r) { return r.estado === "activo"; })[0] || null; }
+  function focusReto() { return activeReto() || S.retos[0] || null; }
+  function tally(retoId, until) {
+    var c = {};
+    S.fotos.forEach(function (f) {
+      if (f.reto !== retoId || (until && f.creado > until)) return;
+      c[f.jugador] = (c[f.jugador] || 0) + 1;
+    });
+    return c;
+  }
+  function photoSrc(f) { return f.asset ? "/_blob/" + f.asset : (f.img || ""); }
+
+  // ---------- boot ----------
+  async function boot() {
+    if (!window.claude || !window.claude.use) return renderMessage("Abre esta página en Claude", "La cacería guarda los retos en línea y solo funciona abierta desde claude.ai.");
+    var got = await Promise.all([claude.use("db"), claude.use("user"), claude.use("assets")]);
+    S.db = got[0]; S.user = got[1]; S.assets = got[2];
+    if (!S.db) return renderMessage("Inicia sesión para jugar", "Para ver y lanzar retos necesitas abrir esta página con tu cuenta de Claude.");
+    if (S.user) {
+      S.uid = await S.user.id();
+      var w = await S.user.can("data.write");
+      if (!S.uid || w === false) S.readOnly = true;
+    } else { S.readOnly = true; }
+    if (S.readOnly) showBanner("Estás mirando sin poder jugar", "Pide a quien creó esta cacería que la comparta contigo por correo con permiso de Editor.");
+    subscribe();
+    setInterval(tick, 1000);
+  }
+
+  function showBanner(title, text) {
+    var b = $("banner"); b.hidden = false;
+    b.innerHTML = "<b>" + esc(title) + "</b>" + esc(text);
+  }
+
+  function subscribe() {
+    var loadTimer = setTimeout(function () {
+      if (!S.ready.j || !S.ready.r) showBanner("Sin conexión con los retos", "Los datos aún no llegan. Se actualizarán solos en cuanto haya conexión.");
+    }, 10000);
+    function loaded() { if (S.ready.j && S.ready.r) { clearTimeout(loadTimer); if (!S.readOnly) $("banner").hidden = true; } }
+    function failed(e) { clearTimeout(loadTimer); showBanner("No se pudieron cargar los retos", errText(e)); }
+
+    S.db.collection("jugadores").onSnapshot(function (snap) {
+      var m = {};
+      snap.docs.forEach(function (d) { m[d.id] = d.data(); });
+      S.jugadores = m;
+      if (!snap.metadata.fromCache) S.ready.j = true;
+      loaded(); refreshNames(); render();
+    }, failed);
+
+    S.db.collection("retos").orderBy("inicia", "desc").limit(40).onSnapshot(function (snap) {
+      var prev = S.retos;
+      S.retos = snap.docs.map(function (d) { var x = Object.assign({}, d.data()); x.id = d.id; return x; });
+      if (!snap.metadata.fromCache) S.ready.r = true;
+      loaded();
+      watchFotos();
+      if (S.ready.r) celebrate(prev);
+      refreshNames(); render();
+    }, failed);
+  }
+
+  // Photos are subscribed only for the challenge on screen; resubscribe when it changes.
+  function watchFotos() {
+    var f = focusReto(), id = f ? f.id : null;
+    if (id === S.fotosFor) return;
+    if (S.unsubFotos) S.unsubFotos();
+    S.fotosFor = id; S.fotos = []; S.unsubFotos = null;
+    if (!id) return;
+    S.unsubFotos = S.db.collection("fotos").where("reto", "==", id).onSnapshot(function (snap) {
+      S.fotos = snap.docs.map(function (d) { var x = Object.assign({}, d.data()); x.id = d.id; return x; })
+        .sort(function (a, b) { return b.creado - a.creado; });
+      render();
+    }, function (e) { toast(errText(e)); });
+  }
+
+  // ---------- clock: countdown and closing by time ----------
+  function tick() {
+    var r = activeReto(), c = $("clock");
+    if (!r) return;
+    var left = r.termina - Date.now();
+    if (c) { c.textContent = fmtLeft(left); c.classList.toggle("hurry", left < 5 * 60000); }
+    if (left <= 0 && !S.readOnly) cerrar(r.id, "tiempo");
+  }
+
+  // ---------- closing a challenge (serialized with a short lease on the challenge) ----------
+  async function cerrar(rid, motivo) {
+    if (S.closing[rid]) return S.closing[rid];
+    S.closing[rid] = (async function () {
+      var ref = S.db.doc("retos/" + rid);
+      for (var i = 0; i < 8; i++) {
+        var lease = await ref.acquire({ holder: S.uid || "anon", ttlMs: 8000 });
+        if (!lease.acquired) { await sleep(900 + Math.random() * 600); continue; }
+        var snap = await ref.get();
+        var r = snap.exists ? snap.data() : null;
+        if (!r || r.estado !== "activo") return false;
+        if (motivo === "tiempo" && Date.now() < r.termina) return false;
+
+        var fs = await S.db.collection("fotos").where("reto", "==", rid).get();
+        var c = {}, last = {};
+        fs.docs.forEach(function (d) {
+          var f = d.data();
+          if (f.creado > r.termina) return;           // late photos never count
+          c[f.jugador] = (c[f.jugador] || 0) + 1;
+          last[f.jugador] = Math.max(last[f.jugador] || 0, f.creado);
+        });
+        if (motivo === "meta" && (c[S.uid] || 0) < r.meta) return false;
+
+        var rank = Object.keys(c).sort(function (a, b) {
+          if (motivo === "meta") { if (a === S.uid) return -1; if (b === S.uid) return 1; }
+          return (c[b] - c[a]) || (last[a] - last[b]);
+        });
+        var resultado = rank.map(function (j, k) { return { j: j, fotos: c[j], puesto: k + 1, puntos: POINTS[k] || 0 }; });
+        await ref.update({
+          estado: "terminado", motivo: motivo, cerrado: Date.now(),
+          ganador: motivo === "meta" ? S.uid : (rank[0] || null),
+          resultado: resultado
+        });
+        return true;
+      }
+      return false;
+    })().catch(function (e) { toast(errText(e)); return false; })
+      .finally(function () { setTimeout(function () { delete S.closing[rid]; }, 3000); });
+    return S.closing[rid];
+  }
+
+  // ---------- actions ----------
+  async function saveProfile(apodo, avatar) {
+    try {
+      await S.db.doc("jugadores/" + S.uid).set({
+        apodo: apodo.trim().slice(0, 30), avatar: avatar,
+        unido: (S.jugadores[S.uid] && S.jugadores[S.uid].unido) || Date.now()
+      });
+      S.editingProfile = false; S.profileDraft = null;
+      render();
+    } catch (e) { toast(errText(e)); }
+  }
+
+  async function lanzar() {
+    var d = S.draft, q = d.q.trim();
+    if (!q) return toast("Escribe qué hay que buscar.");
+    S.busy = true; render();
+    try {
+      var act = S.db.doc("juego/actual");
+      for (var i = 0; i < 6; i++) {
+        var l = await act.acquire({ holder: S.uid, ttlMs: 8000 });
+        if (l.acquired) break;
+        await sleep(800);
+        if (i === 5) throw { message: "Otra persona está lanzando un reto. Inténtalo en un momento." };
+      }
+      var cur = await act.get();
+      var curId = cur.exists && cur.data().reto;
+      if (curId) {
+        var rs = await S.db.doc("retos/" + curId).get();
+        var r = rs.exists ? rs.data() : null;
+        if (r && r.estado === "activo") {
+          if (r.termina > Date.now()) throw { message: "Ya hay un reto en marcha. Terminadlo antes de lanzar otro." };
+          await cerrar(curId, "tiempo");
+        }
+      }
+      var now = Date.now();
+      var ref = S.db.collection("retos").doc();
+      await ref.set({
+        que: q.slice(0, 60), emoji: (d.e || "🔎").slice(0, 8), meta: d.meta,
+        inicia: now, termina: now + d.min * 60000, estado: "activo", creador: S.uid
+      });
+      await act.set({ reto: ref.id });
+    } catch (e) { toast(errText(e), 4500); }
+    S.busy = false; render();
+  }
+
+  function loadImage(file) {
+    return new Promise(function (res, rej) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () { res({ img: img, url: url }); };
+      img.onerror = function () { URL.revokeObjectURL(url); rej({ message: "No se pudo leer la foto." }); };
+      img.src = url;
+    });
+  }
+  function draw(img, max) {
+    var k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    var cv = document.createElement("canvas");
+    cv.width = Math.max(1, Math.round(img.naturalWidth * k)); cv.height = Math.max(1, Math.round(img.naturalHeight * k));
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+    return cv;
+  }
+
+  async function subirFoto(file) {
+    var r = activeReto();
+    if (!r || S.busy) return;
+    if (r.termina <= Date.now()) return toast("Se acabó el tiempo de este reto.");
+    S.busy = true; render();
+    try {
+      var li = await loadImage(file), doc = { reto: r.id, jugador: S.uid, creado: Date.now() };
+      if (S.assets) {
+        var blob = await new Promise(function (res) { draw(li.img, 1280).toBlob(res, "image/jpeg", 0.82); });
+        var up = await S.assets.upload(blob, { type: "image/jpeg" });
+        doc.asset = up.id;
+      } else {
+        // Without asset storage the photo travels inside the record, kept small.
+        var q = 0.62, size = 720, data;
+        do { data = draw(li.img, size).toDataURL("image/jpeg", q); size = Math.round(size * 0.8); q -= 0.06; }
+        while (data.length > 200000 && size > 200);
+        doc.img = data;
+      }
+      URL.revokeObjectURL(li.url);
+      doc.creado = Date.now();
+      await S.db.collection("fotos").add(doc);
+
+      var mine = (await S.db.collection("fotos").where("reto", "==", r.id).where("jugador", "==", S.uid).get()).size;
+      if (mine >= r.meta) {
+        var won = await cerrar(r.id, "meta");
+        if (!won) toast("¡Uf! Alguien cerró el reto justo antes.", 4500);
+      } else {
+        var left = r.meta - mine;
+        toast(left === 1 ? "¡" + mine + "! Te falta solo uno." : "¡" + mine + " de " + r.meta + "! Sigue buscando.");
+      }
+    } catch (e) { toast(errText(e), 4500); }
+    S.busy = false; render();
+  }
+
+  async function borrarFoto(f) {
+    if (!(await ask("¿Borrar esta foto?", "Dejará de contar en el reto.", "Borrar"))) return;
+    try {
+      await S.db.doc("fotos/" + f.id).delete();
+      if (f.asset && S.assets) S.assets.delete(f.asset).catch(function () {});
+      closeViewer();
+    } catch (e) { toast(errText(e)); }
+  }
+
+  async function cancelar(r) {
+    if (!(await ask("¿Cancelar el reto?", "Se termina para toda la familia y nadie suma puntos.", "Cancelar reto"))) return;
+    try {
+      var ref = S.db.doc("retos/" + r.id);
+      var l = await ref.acquire({ holder: S.uid, ttlMs: 6000 });
+      if (!l.acquired) return toast("El reto se está cerrando ahora mismo.");
+      var s = await ref.get();
+      if (s.exists && s.data().estado === "activo") await ref.update({ estado: "cancelado", motivo: "cancelado", cerrado: Date.now() });
+    } catch (e) { toast(errText(e)); }
+  }
+
+  // ---------- celebration ----------
+  function celebrate(prev) {
+    var seen = lsGet("caceria_vistos") || [];
+    S.retos.forEach(function (r) {
+      if (r.estado !== "terminado" || seen.indexOf(r.id) >= 0) return;
+      seen.push(r.id);
+      var wasLive = prev.some(function (p) { return p.id === r.id && p.estado === "activo"; });
+      var recent = Date.now() - (r.cerrado || 0) < 6 * 3600000;
+      if (!(wasLive || (prev.length === 0 && recent)) || r !== S.retos.filter(function (x) { return x.estado === "terminado"; })[0]) return;
+      var w = r.ganador ? person(r.ganador) : null, iWon = r.ganador && r.ganador === S.uid;
+      var mine = (r.resultado || []).filter(function (x) { return x.j === S.uid; })[0];
+      $("partyMark").textContent = iWon ? "🏆" : w ? w.face : "⏰";
+      $("partyTitle").textContent = iWon ? "¡Ganaste la cacería!" : w ? "¡" + w.name + " ganó!" : "Se acabó el tiempo";
+      $("partyText").textContent = r.meta + " " + r.que + (mine ? " · Tú: " + mine.fotos + " fotos, +" + mine.puntos + " puntos" : "");
+      $("toast").hidden = true;
+      $("party").hidden = false;
+      if (w) confetti();
+    });
+    lsSet("caceria_vistos", seen.slice(-80));
+  }
+  function confetti() {
+    var bits = ["🐾", "⭐", "🎉", "✨"];
+    for (var i = 0; i < 22; i++) {
+      var s = document.createElement("span");
+      s.className = "confetti"; s.textContent = bits[i % 4];
+      s.style.left = (Math.random() * 100) + "vw"; s.style.animationDelay = (Math.random() * .7) + "s";
+      document.body.appendChild(s);
+      setTimeout(function (n) { n.remove(); }.bind(null, s), 3400);
+    }
+  }
+  $("partyClose").onclick = function () { $("party").hidden = true; };
+
+  // ---------- viewer ----------
+  function openViewer(id) {
+    var f = S.fotos.filter(function (x) { return x.id === id; })[0];
+    if (!f) return;
+    var p = person(f.jugador), r = activeReto();
+    $("viewerImg").src = photoSrc(f);
+    $("viewerCap").textContent = p.face + " " + p.name + " · " + fmtDate(f.creado);
+    var canDel = !S.readOnly && f.jugador === S.uid && r && r.id === f.reto;
+    $("viewerDel").hidden = !canDel;
+    $("viewerDel").onclick = function () { borrarFoto(f); };
+    $("viewer").hidden = false;
+  }
+  function closeViewer() { $("viewer").hidden = true; $("viewerImg").removeAttribute("src"); }
+  $("viewerClose").onclick = closeViewer;
+  $("viewer").onclick = function (e) { if (e.target === this) closeViewer(); };
+
+  // ---------- rendering ----------
+  function renderMessage(title, text) {
+    $("view").innerHTML = '<div class="card empty"><strong>' + esc(title) + "</strong>" + esc(text) + "</div>";
+  }
+
+  function render() {
+    if (!S.ready.j || !S.ready.r) return;
+    // Don't redraw under someone who is typing; catch up when they leave the field.
+    var a = document.activeElement;
+    if (a && a.type === "text" && $("view").contains(a)) {
+      if (!a.dataset.wait) { a.dataset.wait = "1"; a.addEventListener("blur", function () { setTimeout(render, 0); }, { once: true }); }
+      return;
+    }
+    var meDoc = S.uid ? S.jugadores[S.uid] : null;
+    var chip = $("meChip");
+    chip.hidden = !meDoc;
+    if (meDoc) { $("meFace").textContent = meDoc.avatar || "🙂"; $("meName").textContent = person(S.uid).name; }
+
+    if (!S.readOnly && (!meDoc || S.editingProfile)) return renderProfile(meDoc);
+
+    var r = activeReto(), html = "";
+    html += r ? renderLive(r) : renderLastResult() + (S.readOnly ? "" : renderNew());
+    if (!r && S.readOnly && !S.retos.length) html += '<div class="card empty"><strong>Aún no hay retos</strong>Cuando alguien lance uno aparecerá aquí.</div>';
+    html += renderBoard() + renderHistory();
+    $("view").innerHTML = html;
+    bind(r);
+    tick();
+  }
+
+  function renderProfile(meDoc) {
+    var d = S.profileDraft || (S.profileDraft = {
+      apodo: (meDoc && meDoc.apodo) || S.names[S.uid] || "",
+      avatar: (meDoc && meDoc.avatar) || AVATARS[0]
+    });
+    $("view").innerHTML =
+      '<section class="card stack">' +
+      "<div><div class=\"eyebrow\">" + (meDoc ? "Mi perfil" : "Bienvenida") + "</div>" +
+      "<h2>" + (meDoc ? "¿Cambiamos algo?" : "¿Quién sale a cazar?") + "</h2>" +
+      (meDoc ? "" : '<p class="note">Elige cómo te verá la familia en la carrera.</p>') + "</div>" +
+      '<div class="field"><label for="apodo">Tu nombre en el juego</label><input type="text" id="apodo" maxlength="30" value="' + esc(d.apodo) + '" placeholder="Mamá, Juan, Abuela…"></div>' +
+      '<div class="field"><span class="lbl">Tu avatar</span><div class="avatars" id="avs">' +
+      AVATARS.map(function (a) { return '<button class="av" type="button" data-a="' + a + '" aria-pressed="' + (a === d.avatar) + '">' + a + "</button>"; }).join("") +
+      "</div></div>" +
+      '<div class="row">' + (meDoc ? '<button class="btn quiet" id="profCancel">Volver</button>' : "") +
+      '<button class="btn go wide" id="profSave">' + (meDoc ? "Guardar" : "¡A jugar!") + "</button></div>" +
+      "</section>";
+    $("apodo").oninput = function () { d.apodo = this.value; };
+    $("avs").onclick = function (e) {
+      var b = e.target.closest(".av"); if (!b) return;
+      d.avatar = b.dataset.a;
+      [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b); });
+    };
+    $("profSave").onclick = function () {
+      if (!d.apodo.trim()) return toast("Escribe tu nombre.");
+      saveProfile(d.apodo, d.avatar);
+    };
+    if ($("profCancel")) $("profCancel").onclick = function () { S.editingProfile = false; S.profileDraft = null; render(); };
+  }
+
+  function renderLive(r) {
+    var c = tally(r.id, r.termina), mine = c[S.uid] || 0, creator = person(r.creador);
+    var ids = Object.keys(S.jugadores);
+    Object.keys(c).forEach(function (j) { if (ids.indexOf(j) < 0) ids.push(j); });
+    ids.sort(function (a, b) { return (c[b] || 0) - (c[a] || 0); });
+    var fotos = S.fotos.filter(function (f) { return f.reto === r.id; });
+    return '<section class="ticket">' +
+      '<div class="ticket-head">' +
+      '<div class="eyebrow"><span class="live-dot"></span>Reto en marcha</div>' +
+      "<h2>El primero que encuentre <em>" + r.meta + " " + esc(r.que) + "</em> " + esc(r.emoji) + "</h2>" +
+      '<div class="by">Lo lanzó ' + esc(creator.face + " " + creator.name) + "</div></div>" +
+      '<div class="ticket-stats">' +
+      "<div><small>Tus fotos</small><strong>" + mine + "<span> / " + r.meta + "</span></strong></div>" +
+      '<div><small>Queda</small><strong id="clock">' + fmtLeft(r.termina - Date.now()) + "</strong></div></div>" +
+      (S.readOnly ? "" :
+        '<div class="shoot"><label class="' + (S.busy ? "busy" : "") + '">' +
+        '<input type="file" id="shot" accept="image/*" capture="environment" aria-label="Hacer foto">' +
+        (S.busy ? "Subiendo foto…" : "📸 ¡Encontré uno!") + "</label>" +
+        "<p>Haz la foto en cuanto lo veas. Cuenta al instante para todos.</p></div>") +
+      "</section>" +
+      '<section class="card"><h2>La carrera</h2><ul class="race">' +
+      ids.map(function (id) {
+        var p = person(id), n = c[id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
+        return '<li class="' + (id === S.uid ? "mine" : "") + '"><span class="face">' + esc(p.face) + "</span>" +
+          '<div class="who"><div class="name">' + esc(p.name) + '</div><div class="bar"><i style="width:' + pct + '%"></i></div></div>' +
+          '<span class="n">' + n + "/" + r.meta + "</span></li>";
+      }).join("") + "</ul></section>" +
+      (fotos.length ? '<section class="card"><h2>Fotos del reto</h2><div class="gallery">' + fotos.map(thumb).join("") + "</div></section>" : "") +
+      (!S.readOnly && r.creador === S.uid ? '<button class="btn quiet wide" id="cancelReto">Cancelar este reto</button>' : "");
+  }
+
+  function thumb(f) {
+    var p = person(f.jugador);
+    return '<button class="ph" data-id="' + esc(f.id) + '" aria-label="Foto de ' + esc(p.name) + '"><img loading="lazy" alt="" src="' + esc(photoSrc(f)) + '"><span>' + esc(p.face) + "</span></button>";
+  }
+
+  function renderLastResult() {
+    var r = S.retos[0];
+    if (!r || r.estado !== "terminado") return "";
+    var w = r.ganador ? person(r.ganador) : null;
+    var fotos = S.fotos.filter(function (f) { return f.reto === r.id; });
+    return '<section class="card stack">' +
+      '<div class="result"><div class="trophy">' + (w ? esc(w.face) : "⏰") + "</div><div>" +
+      '<div class="eyebrow">Último reto · ' + r.meta + " " + esc(r.que) + "</div>" +
+      "<h2>" + (w ? "Ganó " + esc(w.name) : "Nadie encontró ninguno") + "</h2>" +
+      '<p class="note">' + (r.motivo === "meta" ? "Llegó primero a la meta." : w ? "Se acabó el tiempo y tenía más fotos." : "Se acabó el tiempo sin fotos.") + "</p></div></div>" +
+      (fotos.length ? '<div class="gallery">' + fotos.map(thumb).join("") + "</div>" : "") +
+      "</section>";
+  }
+
+  function renderNew() {
+    var d = S.draft;
+    return '<section class="card stack">' +
+      '<div><div class="eyebrow">Nuevo reto</div><h2>¿Qué salimos a buscar?</h2></div>' +
+      '<div class="chips" id="presets">' + PRESETS.map(function (p) {
+        return '<button class="chip" type="button" data-e="' + p.e + '" data-q="' + esc(p.q) + '" aria-pressed="' + (p.q === d.q) + '">' + p.e + " " + esc(p.q) + "</button>";
+      }).join("") + "</div>" +
+      '<div class="row"><input type="text" id="rEmoji" maxlength="4" value="' + esc(d.e) + '" aria-label="Emoji" style="flex:0 0 64px;text-align:center">' +
+      '<input type="text" id="rQue" maxlength="60" value="' + esc(d.q) + '" aria-label="Qué hay que buscar"></div>' +
+      '<div class="field"><span class="lbl">¿Cuántos hay que encontrar?</span><div class="stepper">' +
+      '<button class="btn" type="button" data-d="-1" aria-label="Menos">−</button><output id="rMeta">' + d.meta + "</output>" +
+      '<button class="btn" type="button" data-d="1" aria-label="Más">+</button></div></div>' +
+      '<div class="field"><span class="lbl">¿Cuánto dura?</span><div class="chips" id="durs">' + DURS.map(function (x) {
+        return '<button class="chip" type="button" data-m="' + x.m + '" aria-pressed="' + (x.m === d.min) + '">' + x.l + "</button>";
+      }).join("") + "</div></div>" +
+      '<button class="btn go wide" id="launch"' + (S.busy ? " disabled" : "") + ">" + (S.busy ? "Lanzando…" : "Lanzar el reto a toda la familia") + "</button>" +
+      "</section>";
+  }
+
+  function renderBoard() {
+    var pts = {}, wins = {};
+    S.retos.forEach(function (r) {
+      if (r.estado !== "terminado") return;
+      (r.resultado || []).forEach(function (x) {
+        pts[x.j] = (pts[x.j] || 0) + x.puntos;
+        if (x.puesto === 1) wins[x.j] = (wins[x.j] || 0) + 1;
+      });
+    });
+    var ids = Object.keys(S.jugadores);
+    if (!ids.length) return "";
+    ids.sort(function (a, b) { return (pts[b] || 0) - (pts[a] || 0) || (wins[b] || 0) - (wins[a] || 0); });
+    return '<section class="card"><h2>Clasificación</h2><ol class="board">' +
+      ids.map(function (id, i) {
+        var p = person(id);
+        return '<li class="' + (id === S.uid ? "mine" : "") + '"><span class="pos">' + (i + 1) + '</span><span class="face">' + esc(p.face) + "</span>" +
+          '<span class="name">' + esc(p.name) + "<small>" + (wins[id] ? wins[id] + (wins[id] === 1 ? " reto ganado" : " retos ganados") : "Sin victorias aún") + "</small></span>" +
+          '<span class="pts">' + (pts[id] || 0) + " <small>pts</small></span></li>";
+      }).join("") + "</ol>" +
+      '<p class="note" style="margin-top:10px">Cada reto: 1.º 3 pts · 2.º 2 pts · 3.º 1 pt. Para sumar a alguien, comparte esta página con su correo y permiso de Editor.</p></section>';
+  }
+
+  function renderHistory() {
+    var done = S.retos.filter(function (r) { return r.estado !== "activo"; });
+    if (!done.length) return "";
+    return '<section class="card"><h2>Retos anteriores</h2><ul class="history">' +
+      done.map(function (r) {
+        var w = r.ganador ? person(r.ganador) : null;
+        return "<li><span>" + esc(r.emoji) + " " + r.meta + " " + esc(r.que) + "<small>" + fmtDate(r.inicia) + "</small></span><span>" +
+          (r.estado === "cancelado" ? '<span class="muted">Cancelado</span>' : w ? esc(w.face + " " + w.name) : '<span class="muted">Sin ganador</span>') +
+          "</span></li>";
+      }).join("") + "</ul></section>";
+  }
+
+  function bind(r) {
+    $("meChip").onclick = function () { if (S.readOnly) return; S.editingProfile = true; S.profileDraft = null; render(); };
+    document.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
+    if (r) {
+      if ($("shot")) $("shot").onchange = function () { var f = this.files[0]; this.value = ""; if (f) subirFoto(f); };
+      if ($("cancelReto")) $("cancelReto").onclick = function () { cancelar(r); };
+      return;
+    }
+    if (!$("launch")) return;
+    var d = S.draft;
+    $("presets").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      d.e = b.dataset.e; d.q = b.dataset.q; $("rEmoji").value = d.e; $("rQue").value = d.q;
+      [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b); });
+    };
+    $("rEmoji").oninput = function () { d.e = this.value; };
+    $("rQue").oninput = function () {
+      d.q = this.value;
+      [].forEach.call($("presets").children, function (c) { c.setAttribute("aria-pressed", c.dataset.q === d.q); });
+    };
+    document.querySelectorAll(".stepper .btn").forEach(function (b) {
+      b.onclick = function () { d.meta = Math.max(1, Math.min(100, d.meta + Number(b.dataset.d))); $("rMeta").textContent = d.meta; };
+    });
+    $("durs").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      d.min = Number(b.dataset.m);
+      [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b); });
+    };
+    $("launch").onclick = lanzar;
+  }
+
+  boot();
+})();
+</script>

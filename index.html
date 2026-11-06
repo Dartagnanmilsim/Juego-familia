@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#fef6e4">
+  <title>Retos en familia</title>
+  <link rel="stylesheet" href="css/retos.css?v=1">
+</head>
+<body>
+
+<header class="bar">
+  <span class="back spacer" aria-hidden="true"></span>
+  <div class="bar-title">
+    <strong id="familyName">Retos en familia</strong>
+    <button id="familyCode" class="code" hidden></button>
+  </div>
+  <button id="meBtn" class="me" hidden aria-label="Mi perfil"></button>
+</header>
+
+<div id="offline" class="offline" hidden>Sin conexión… reintentando</div>
+
+<main id="app" aria-live="polite"></main>
+
+<!-- Visor de foto -->
+<div id="viewer" class="viewer" hidden>
+  <img id="viewerImg" alt="">
+  <div class="viewer-info"><span id="viewerCaption"></span></div>
+  <div class="viewer-actions">
+    <button id="viewerDelete" class="btn danger" hidden>🗑️ Borrar mi foto</button>
+    <button id="viewerClose" class="btn">Cerrar</button>
+  </div>
+</div>
+
+<!-- Celebración -->
+<div id="party" class="party" hidden>
+  <div class="party-box">
+    <div class="party-emoji" id="partyEmoji">🏆</div>
+    <h2 id="partyTitle"></h2>
+    <p id="partyText"></p>
+    <button class="btn primary" id="partyClose">¡Genial!</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/vendor/supabase-2.45.4.js"></script>
+<script src="js/retos-config.js?v=1"></script>
+<script src="js/retos.js?v=1"></script>
+</body>
+</html>
