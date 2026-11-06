@@ -37,7 +37,7 @@ create table if not exists public.retos (
   check (termina_en > inicia_en)
 );
 create index if not exists retos_inicio_idx on public.retos(inicia_en desc);
-create unique index if not exists retos_un_activo on public.retos((true)) where estado = 'activo';
+drop index if exists public.retos_un_activo;
 create table if not exists public.fotos (
   id         uuid primary key default gen_random_uuid(),
   reto_id    uuid not null references public.retos(id) on delete cascade,
@@ -46,6 +46,7 @@ create table if not exists public.fotos (
   creado_en  timestamptz not null default now()
 );
 create index if not exists fotos_reto_idx on public.fotos(reto_id, usuario_id);
+alter table public.retos add column if not exists para_todos boolean not null default true;
 alter table public.retos add column if not exists juez_id uuid references public.usuarios(id) on delete set null;
 alter table public.fotos add column if not exists estado text not null default 'pendiente';
 alter table public.fotos add column if not exists aceptada_en timestamptz;
@@ -60,6 +61,11 @@ create table if not exists public.votos (
   primary key (foto_id, usuario_id)
 );
 create index if not exists votos_reto_idx on public.votos(reto_id);
+create table if not exists public.participantes (
+  reto_id    uuid not null references public.retos(id) on delete cascade,
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
+  primary key (reto_id, usuario_id)
+);
 create table if not exists public.puntajes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
   usuario_id uuid not null references public.usuarios(id) on delete cascade,
@@ -78,18 +84,21 @@ alter table public.retos        enable row level security;
 alter table public.fotos        enable row level security;
 alter table public.puntajes     enable row level security;
 alter table public.votos        enable row level security;
+alter table public.participantes enable row level security;
 drop policy if exists "leer usuarios" on public.usuarios;
 drop policy if exists "leer retos"    on public.retos;
 drop policy if exists "leer fotos"    on public.fotos;
 drop policy if exists "leer puntajes" on public.puntajes;
 drop policy if exists "leer votos"    on public.votos;
+drop policy if exists "leer participantes" on public.participantes;
 create policy "leer usuarios" on public.usuarios for select to anon, authenticated using (true);
 create policy "leer retos"    on public.retos    for select to anon, authenticated using (true);
 create policy "leer fotos"    on public.fotos    for select to anon, authenticated using (true);
 create policy "leer puntajes" on public.puntajes for select to anon, authenticated using (true);
 create policy "leer votos"    on public.votos    for select to anon, authenticated using (true);
-grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos to anon, authenticated;
-revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos from anon, authenticated;
+create policy "leer participantes" on public.participantes for select to anon, authenticated using (true);
+grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes to anon, authenticated;
+revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes from anon, authenticated;
 revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
 create or replace function public._usuario_de(p_token uuid)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -197,6 +206,7 @@ begin
   end loop;
 end $$;
 drop function if exists public.crear_reto(uuid, text, text, int, int);
+drop function if exists public.crear_reto(uuid, text, text, int, int, uuid);
 drop function if exists public.borrar_foto(uuid, uuid);
 drop function if exists public.cancelar_reto(uuid, uuid);
 drop function if exists public.admin_cancelar_reto(text, uuid);
@@ -205,17 +215,36 @@ returns uuid language sql security definer set search_path = public as $$
   select coalesce(juez_id, creado_por) from public.retos where id = p_reto;
 $$;
 revoke all on function public._juez_de(uuid) from public, anon, authenticated;
-create or replace function public.crear_reto(p_token uuid, p_que text, p_emoji text, p_meta int, p_minutos int, p_juez uuid)
+create or replace function public._compite(p_reto uuid, p_usuario uuid)
+returns boolean language sql security definer set search_path = public as $$
+  select exists (
+    select 1 from public.retos r
+     where r.id = p_reto and p_usuario <> coalesce(r.juez_id, r.creado_por)
+       and (r.para_todos or exists (select 1 from public.participantes x where x.reto_id = r.id and x.usuario_id = p_usuario))
+  );
+$$;
+revoke all on function public._compite(uuid, uuid) from public, anon, authenticated;
+create or replace function public.crear_reto(p_token uuid, p_que text, p_emoji text, p_meta int, p_minutos int,
+                                             p_juez uuid, p_para_todos boolean, p_participantes uuid[])
 returns public.retos language plpgsql security definer set search_path = public as $$
 declare v uuid := public._usuario_de(p_token); r public.retos; v_juez uuid := coalesce(p_juez, v);
+        v_todos boolean := coalesce(p_para_todos, true); n int;
 begin
   if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then raise exception 'duracion_invalida'; end if;
   if not exists (select 1 from public.usuarios where id = v_juez) then raise exception 'juez_no_existe'; end if;
+  if not v_todos then
+    select count(*) into n from public.usuarios
+     where id = any(coalesce(p_participantes, '{}')) and id <> v_juez;
+    if n = 0 then raise exception 'sin_participantes'; end if;
+  end if;
   perform public.revisar_retos();
-  if exists (select 1 from public.retos where estado = 'activo') then raise exception 'ya_hay_reto_activo'; end if;
-  insert into public.retos (creado_por, juez_id, que_buscar, emoji, meta, termina_en)
-  values (v, v_juez, trim(p_que), coalesce(nullif(p_emoji, ''), '🎯'), p_meta, now() + make_interval(mins => p_minutos))
+  insert into public.retos (creado_por, juez_id, para_todos, que_buscar, emoji, meta, termina_en)
+  values (v, v_juez, v_todos, trim(p_que), coalesce(nullif(p_emoji, ''), '🎯'), p_meta, now() + make_interval(mins => p_minutos))
   returning * into r;
+  if not v_todos then
+    insert into public.participantes (reto_id, usuario_id)
+    select r.id, id from public.usuarios where id = any(p_participantes) and id <> v_juez;
+  end if;
   return r;
 end $$;
 create or replace function public.registrar_foto(p_token uuid, p_reto uuid, p_ruta text)
@@ -230,6 +259,7 @@ begin
   end if;
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
   if v = coalesce(r.juez_id, r.creado_por) then raise exception 'el_juez_no_compite'; end if;
+  if not public._compite(p_reto, v) then raise exception 'no_participas'; end if;
   insert into public.fotos (reto_id, usuario_id, ruta) values (p_reto, v, p_ruta);
   select count(*), count(*) filter (where estado = 'aceptada') into n, a
     from public.fotos where reto_id = p_reto and usuario_id = v;
@@ -244,6 +274,7 @@ begin
   select * into r from public.retos where id = f.reto_id;
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
   if f.usuario_id = v then raise exception 'no_puedes_votar_tu_foto'; end if;
+  if not public._compite(f.reto_id, v) then raise exception 'no_participas'; end if;
   if p_tipo is null then
     delete from public.votos where foto_id = p_foto and usuario_id = v;
   elsif p_tipo in ('acepta', 'denuncia') then
@@ -320,7 +351,7 @@ grant execute on function
   public.editar_perfil(uuid, text, text),
   public.cambiar_clave(uuid, text, text),
   public.revisar_retos(),
-  public.crear_reto(uuid, text, text, int, int, uuid),
+  public.crear_reto(uuid, text, text, int, int, uuid, boolean, uuid[]),
   public.registrar_foto(uuid, uuid, text),
   public.votar_foto(uuid, uuid, text),
   public.juez_aceptar_foto(uuid, uuid),
@@ -334,7 +365,7 @@ to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos'] loop
+  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos', 'participantes'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

@@ -8,7 +8,7 @@ El primero que llega a la meta cierra el reto y se lleva los puntos.
 Tres módulos (pestañas abajo de la cabecera):
 
 - **👥 Usuarios:** cada persona crea su usuario y clave (y puede crear usuarios para otros). Lista de jugadores y perfil.
-- **🎯 Retos:** cualquiera crea un reto y elige un **juez**. El juez no compite: acepta ✅ o elimina 🗑️ las fotos.
+- **🎯 Retos:** puede haber **varios retos a la vez**. Quien crea un reto elige si es **para todos** o **solo para algunos** jugadores, y elige un **juez**. El juez no compite: acepta ✅ o elimina 🗑️ las fotos.
   **Solo cuentan las fotos aceptadas por el juez.** Los competidores marcan las fotos de otros con 👍 aceptar o 🚩 denunciar
   para avisar al juez. Fotos solo en el momento, con la cámara del juego.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.

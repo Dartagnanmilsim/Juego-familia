@@ -355,3 +355,34 @@ button.camera { border: none; cursor: pointer; }
 .new-user { margin-top: 16px; padding: 14px; border-radius: 18px; background: #faf6ef; text-align: left; }
 .new-user h3 { margin: 0; }
 .admin-list li.is-me { background: #fff7d6; border-radius: 12px; padding-left: 8px; padding-right: 8px; }
+
+/* Varios retos a la vez */
+.new-reto { margin: 0 0 16px; }
+.back-btn { margin: 0 0 12px; }
+.reto-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.reto-card {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  text-align: left; padding: 12px; border-radius: 18px; border: 2px solid var(--line); background: #fffdf8; cursor: pointer;
+}
+.reto-card:active { transform: scale(0.99); }
+.reto-emoji { font-size: 38px; }
+.reto-body { display: grid; gap: 4px; min-width: 0; }
+.reto-body b { font-size: 17px; }
+.reto-body small { color: var(--muted); font-size: 13px; }
+.reto-body small b { font-size: 13px; color: var(--ink); }
+.reto-go { font-size: 28px; color: var(--muted); }
+.role { justify-self: start; font-size: 12px; padding: 2px 10px; border-radius: 20px; }
+.role.in { background: #dcf3e2; color: #1d6b34; }
+.role.judge { background: #fff3c4; color: #8a5a00; }
+.role.out { background: #f1ebe1; color: var(--muted); }
+.to-review { color: #8a5a00 !important; font-weight: bold; }
+.out-box { background: #f1ebe1; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seg button { padding: 12px; border-radius: 14px; border: 2px solid var(--line); background: #fffdf8; font-size: 16px; cursor: pointer; }
+.seg button.on { border-color: var(--pink); background: #ffe1e8; font-weight: bold; }
+#partsBox { margin-top: 10px; }
+.chip.disabled { opacity: 0.45; cursor: not-allowed; }
+.hist-item { width: 100%; display: flex; justify-content: space-between; gap: 10px; background: none; border: none; padding: 0; text-align: left; font-size: 16px; cursor: pointer; }
+.hist-item > span:last-child { text-align: right; flex: none; max-width: 50%; }
+.winner { font-size: 20px; margin: 8px 0; }
+.winner small { font-size: 14px; color: var(--muted); }

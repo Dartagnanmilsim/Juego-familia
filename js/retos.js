@@ -33,6 +33,8 @@
     el_juez_no_compite: "Eres el juez de este reto: no puedes subir fotos.",
     solo_el_juez: "Solo el juez de este reto puede hacer eso.",
     no_puedes_votar_tu_foto: "No puedes marcar tus propias fotos.",
+    no_participas: "No participas en este reto.",
+    sin_participantes: "Elige al menos un participante (que no sea el juez).",
     juez_no_existe: "El juez elegido ya no existe. Elige otro.",
     foto_no_existe: "Esa foto ya no existe.",
     duracion_invalida: "Elige una duración válida.",
@@ -49,7 +51,9 @@
   var adminClave = null;         // solo en memoria
   var data = null;               // { usuarios, retos, puntajes, fotos }
   var busy = false;
-  var draft = { emoji: "🎯", que: "", meta: 10, min: 60, juez: null };
+  var draft = { emoji: "🎯", que: "", meta: 10, min: 60, juez: null, todos: true, parts: [] };
+  var sel = null;                // reto abierto en el módulo Retos
+  var creating = false;          // mostrando el formulario "crear reto"
   var newUser = null;            // formulario "crear usuario para otra persona"
   var channel = null, pollTimer = null, tickTimer = null, reloadTimer = null;
 
@@ -79,7 +83,15 @@
     return (data && data.usuarios.filter(function (u) { return u.id === id; })[0]) || { nombre: "Alguien", avatar: "🙂", usuario: "" };
   }
   function juezDe(r) { return r ? (r.juez_id || r.creado_por) : null; }
-  function activeReto() { return data && data.retos.filter(function (r) { return r.estado === "activo"; })[0]; }
+  function retoById(id) { return data && data.retos.filter(function (r) { return r.id === id; })[0]; }
+  function activos() { return data ? data.retos.filter(function (r) { return r.estado === "activo"; }) : []; }
+  // ¿Compite este usuario en el reto? (no es el juez y el reto es para todos o está en la lista)
+  function compite(r, uid) {
+    if (!r || uid === juezDe(r)) return false;
+    if (r.para_todos !== false) return true;
+    return data.participantes.some(function (x) { return x.reto_id === r.id && x.usuario_id === uid; });
+  }
+  function competidores(r) { return data.usuarios.filter(function (u) { return compite(r, u.id); }); }
   function fmtLeft(ms) {
     if (ms <= 0) return "¡Tiempo!";
     var s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
@@ -130,6 +142,7 @@
   }
   function goTab(t) {
     if (t === "admin") { view = adminClave ? "admin" : "admin-login"; render(); return; }
+    if (t === "retos") { sel = null; creating = false; }
     view = t; render(); window.scrollTo(0, 0);
   }
 
@@ -279,7 +292,7 @@
           var res = must(await db.rpc("registrar_usuario", { p_usuario: newUser.usuario, p_clave: el("nuPass").value, p_nombre: newUser.nombre, p_avatar: newUser.avatar }));
           db.rpc("cerrar_sesion", { p_token: res.token });   // tú sigues con tu sesión
           toast("Usuario @" + res.usuario.usuario + " creado");
-          newUser = null; await reload();
+          newUser = null; await reload(); renderUsers();
         });
       };
     }
@@ -288,7 +301,7 @@
       e.preventDefault();
       guard(async function () {
         me = must(await db.rpc("editar_perfil", { p_token: token, p_nombre: el("pName").value, p_avatar: p.avatar }));
-        toast("Perfil guardado"); await reload();
+        toast("Perfil guardado"); await reload(); renderUsers(); setHeader();
       });
     };
     el("passForm").onsubmit = function (e) {
@@ -314,17 +327,19 @@
       var r = await Promise.all([
         db.from("usuarios").select("*").order("creado_en"),
         db.from("retos").select("*").order("inicia_en", { ascending: false }).limit(50),
-        db.from("puntajes").select("*")
+        db.from("puntajes").select("*"),
+        db.from("participantes").select("*")
       ]);
-      var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), fotos: [], votos: [] };
-      var focus = next.retos.filter(function (x) { return x.estado === "activo"; })[0] || next.retos[0];
-      if (focus) {
-        var fv = await Promise.all([
-          db.from("fotos").select("*").eq("reto_id", focus.id).order("creado_en", { ascending: false }),
-          db.from("votos").select("*").eq("reto_id", focus.id)
+      var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), participantes: must(r[3]), fotos: [], votos: [] };
+      var ids = next.retos.filter(function (x) { return x.estado === "activo" || x.id === sel; }).map(function (x) { return x.id; });
+      var fv = await Promise.all(ids.map(function (id) {
+        return Promise.all([
+          db.from("fotos").select("*").eq("reto_id", id).order("creado_en", { ascending: false }),
+          db.from("votos").select("*").eq("reto_id", id)
         ]);
-        next.fotos = must(fv[0]); next.votos = must(fv[1]);
-      }
+      }));
+      fv.forEach(function (pair) { next.fotos = next.fotos.concat(must(pair[0])); next.votos = next.votos.concat(must(pair[1])); });
+      if (sel && !next.retos.some(function (x) { return x.id === sel; })) sel = null;   // el administrador lo eliminó
       if (me) {
         var fresh = next.usuarios.filter(function (u) { return u.id === me.id; })[0];
         if (!fresh) { data = next; logout(true); return; }   // el administrador eliminó este usuario
@@ -334,7 +349,7 @@
       var prev = data;
       data = next;
       if (me) celebrateIfNew(prev);
-      if (view === "retos" || view === "admin") render();
+      if (view === "admin" || (view === "retos" && !(creating && prev))) render();   // no borrar el formulario mientras se escribe
       else if (view === "usuarios" && !prev) render();   // no borrar lo que se escribe en Usuarios
     } catch (e) {
       el("offline").hidden = false;
@@ -348,7 +363,7 @@
   function startLive() {
     stopLive();
     channel = db.channel("retos-en-familia");
-    ["usuarios", "retos", "fotos", "puntajes", "votos"].forEach(function (t) {
+    ["usuarios", "retos", "fotos", "puntajes", "votos", "participantes"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     });
     channel.subscribe();
@@ -363,13 +378,18 @@
     if (!document.hidden && data && (view === "retos" || view === "admin" || view === "usuarios")) reload();
   });
 
+  // Cuenta atrás de todos los retos en pantalla
   function updateClock() {
-    var r = activeReto(), c = el("clock");
-    if (!r || !c) return;
-    var left = new Date(r.termina_en) - Date.now();
-    c.textContent = fmtLeft(left);
-    c.classList.toggle("hurry", left < 5 * 60000);
-    if (left <= 0 && !updateClock.asked) { updateClock.asked = true; setTimeout(function () { updateClock.asked = false; reload(); }, 1500); }
+    var vencido = false;
+    $app.querySelectorAll("[data-left]").forEach(function (c) {
+      var r = retoById(c.dataset.left);
+      if (!r || r.estado !== "activo") return;
+      var left = new Date(r.termina_en) - Date.now();
+      c.textContent = fmtLeft(left);
+      c.classList.toggle("hurry", left < 5 * 60000);
+      if (left <= 0) vencido = true;
+    });
+    if (vencido && !updateClock.asked) { updateClock.asked = true; setTimeout(function () { updateClock.asked = false; reload(); }, 1500); }
   }
 
   // Fotos por jugador en un reto: aceptadas y pendientes
@@ -394,38 +414,77 @@
 
   // ============================================================ MÓDULO RETOS
   function renderGame() {
-    var r = activeReto();
-    var html = r ? renderActive(r) : renderLastResult() + renderNewForm();
-    html += renderRanking() + renderHistory();
+    var r = sel && retoById(sel);
+    var html;
+    if (creating) html = renderNewForm();
+    else if (r) html = '<button class="btn ghost back-btn" id="backList">← Todos los retos</button>' + (r.estado === "activo" ? renderActive(r) : renderFinished(r));
+    else html = renderList() + renderRanking() + renderHistory();
     $app.innerHTML = html;
     bindGame(r);
     updateClock();
   }
 
+  function rolBadge(r) {
+    if (juezDe(r) === me.id) return '<span class="role judge">⚖️ Eres el juez</span>';
+    if (compite(r, me.id)) return '<span class="role in">✅ Participas</span>';
+    return '<span class="role out">👀 No participas</span>';
+  }
+
+  function renderList() {
+    var act = activos();
+    // primero los retos donde participo o soy juez
+    act.sort(function (a, b) {
+      var pa = (juezDe(a) === me.id || compite(a, me.id)) ? 0 : 1, pb = (juezDe(b) === me.id || compite(b, me.id)) ? 0 : 1;
+      return pa - pb || new Date(a.termina_en) - new Date(b.termina_en);
+    });
+    return '<button class="btn primary wide new-reto" id="newReto">➕ Crear un reto nuevo</button>' +
+      '<section class="card"><h2>🔥 Retos en marcha (' + act.length + ')</h2>' +
+      (act.length ? '<ul class="reto-list">' + act.map(function (r) {
+        var c = counts(r.id), mine = c[me.id] || { ok: 0, pend: 0 };
+        var pend = data.fotos.filter(function (f) { return f.reto_id === r.id && f.estado !== "aceptada"; }).length;
+        var quien = r.para_todos !== false ? "Todos" : competidores(r).map(function (u) { return u.avatar; }).join(" ");
+        return '<li><button class="reto-card" data-open="' + r.id + '">' +
+          '<span class="reto-emoji">' + esc(r.emoji) + '</span>' +
+          '<span class="reto-body"><b>' + r.meta + " fotos · " + esc(r.que_buscar) + '</b>' +
+          '<small>⚖️ ' + esc(user(juezDe(r)).nombre) + ' · 👥 ' + esc(quien) + ' · ⏱️ <span data-left="' + r.id + '"></span></small>' +
+          rolBadge(r) +
+          (compite(r, me.id) ? '<small>Tus fotos aceptadas: <b>' + mine.ok + '/' + r.meta + '</b>' + (mine.pend ? " · " + mine.pend + " esperando" : "") + '</small>' : "") +
+          (juezDe(r) === me.id && pend ? '<small class="to-review">' + pend + ' foto' + (pend === 1 ? "" : "s") + ' por revisar</small>' : "") +
+          '</span><span class="reto-go">›</span></button></li>';
+      }).join("") + '</ul>' : '<p class="hint">No hay retos en marcha. ¡Crea uno!</p>') +
+      '</section>';
+  }
+
   function renderActive(r) {
-    var c = counts(r.id), juez = user(juezDe(r)), soyJuez = juezDe(r) === me.id;
+    var c = counts(r.id), juez = user(juezDe(r)), soyJuez = juezDe(r) === me.id, participo = compite(r, me.id);
     var mine = c[me.id] || { ok: 0, pend: 0 };
-    var competidores = data.usuarios.filter(function (u) { return u.id !== juezDe(r); })
-      .sort(function (a, b) { return ((c[b.id] || {}).ok || 0) - ((c[a.id] || {}).ok || 0); });
+    var lista = competidores(r).sort(function (a, b) { return ((c[b.id] || {}).ok || 0) - ((c[a.id] || {}).ok || 0); });
     var fotos = data.fotos.filter(function (f) { return f.reto_id === r.id; });
     if (soyJuez) fotos.sort(function (a, b) {   // al juez: primero pendientes y las más denunciadas
       var pa = a.estado === "aceptada" ? 1 : 0, pb = b.estado === "aceptada" ? 1 : 0;
       return pa - pb || votosDe(b.id).denuncia - votosDe(a.id).denuncia || new Date(a.creado_en) - new Date(b.creado_en);
     });
     var pendientes = fotos.filter(function (f) { return f.estado !== "aceptada"; }).length;
+    var accion;
+    if (soyJuez) {
+      accion = '<div class="judge-box"><b>⚖️ Eres el juez de este reto</b>No compites. Revisa las fotos: ✅ acepta las que valen y 🗑️ elimina las que no. ' +
+        'Solo cuentan las que aceptes.<div class="judge-count">' + pendientes + ' foto' + (pendientes === 1 ? "" : "s") + ' por revisar</div></div>';
+    } else if (participo) {
+      accion = '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas' + (mine.pend ? " · " + mine.pend + " esperando al juez" : "") + '</small></div>' +
+        '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
+        '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego. El juez decide si cuentan.</p>';
+    } else {
+      accion = '<div class="judge-box out-box"><b>👀 No participas en este reto</b>Puedes ver cómo va, pero no hacer fotos ni marcarlas.</div>';
+    }
     return '<section class="card active">' +
       '<div class="tag">🔥 Reto en marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
-      '<p class="sub">⚖️ Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '</p>' +
-      '<div class="clock-wrap">⏱️ <span id="clock"></span></div>' +
-      (soyJuez
-        ? '<div class="judge-box"><b>⚖️ Eres el juez de este reto</b>No compites. Revisa las fotos: ✅ acepta las que valen y 🗑️ elimina las que no. ' +
-          'Solo cuentan las que aceptes.<div class="judge-count">' + pendientes + ' foto' + (pendientes === 1 ? "" : "s") + ' por revisar</div></div>'
-        : '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas' + (mine.pend ? " · " + mine.pend + " esperando al juez" : "") + '</small></div>' +
-          '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
-          '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego. El juez decide si cuentan.</p>') +
-      '<ul class="race">' + competidores.map(function (u) {
+      '<p class="sub">⚖️ Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '<br>👥 ' +
+      (r.para_todos !== false ? "Para todos" : "Solo para: " + esc(lista.map(function (u) { return u.nombre; }).join(", "))) + '</p>' +
+      '<div class="clock-wrap">⏱️ <span data-left="' + r.id + '"></span></div>' +
+      accion +
+      '<ul class="race">' + lista.map(function (u) {
         var x = c[u.id] || { ok: 0, pend: 0 }, pct = Math.min(100, Math.round(x.ok / r.meta * 100));
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '>' +
           '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
@@ -435,19 +494,40 @@
       '</section>' +
       '<section class="card"><h2>📷 Fotos del reto (' + fotos.length + ')</h2>' +
       (fotos.length
-        ? (soyJuez ? "" : '<p class="hint">Si una foto de otro jugador vale, márcala 👍. Si no vale, 🚩 denúnciala. El juez lo verá.</p>') +
-          '<ul class="photo-list">' + fotos.map(function (f) { return photoItem(f, r, soyJuez); }).join("") + '</ul>'
+        ? (participo ? '<p class="hint">Si una foto de otro jugador vale, márcala 👍. Si no vale, 🚩 denúnciala. El juez lo verá.</p>' : "") +
+          '<ul class="photo-list">' + fotos.map(function (f) { return photoItem(f, r, soyJuez, participo); }).join("") + '</ul>'
         : '<p class="hint">Todavía no hay fotos.</p>') +
       '</section>';
   }
 
-  function photoItem(f, r, soyJuez) {
+  function renderFinished(r) {
+    var w = r.ganador_id ? user(r.ganador_id) : null;
+    var fotos = data.fotos.filter(function (f) { return f.reto_id === r.id && f.estado === "aceptada"; });
+    var pos = data.puntajes.filter(function (p) { return p.reto_id === r.id; }).sort(function (a, b) { return a.puesto - b.puesto; });
+    return '<section class="card result">' +
+      '<div class="tag">' + (r.estado === "cancelado" ? "Reto cancelado" : "Reto terminado") + ' · ' + fmtDate(r.inicia_en) + '</div>' +
+      '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
+      '<h2>' + r.meta + ' fotos de: ' + esc(r.que_buscar) + '</h2>' +
+      (w ? '<p class="winner">🏆 Ganó <b>' + esc(w.avatar + " " + w.nombre) + '</b><br><small>' +
+           (r.motivo === "meta" ? "Llegó primero a la meta con fotos aceptadas" : "Se acabó el tiempo y tenía más fotos aceptadas") + '</small></p>'
+         : '<p class="sub">Nadie tenía fotos aceptadas.</p>') +
+      (pos.length ? '<ol class="ranking">' + pos.map(function (p) {
+        var u = user(p.usuario_id);
+        return '<li><span class="pos">' + (["🥇", "🥈", "🥉"][p.puesto - 1] || p.puesto) + '</span><span class="who">' + esc(u.avatar + " " + u.nombre) + '</span>' +
+          '<span class="wins">' + p.fotos + ' fotos</span><span class="pts">+' + p.puntos + ' pts</span></li>';
+      }).join("") + '</ol>' : "") +
+      '<p class="sub">⚖️ Juez: ' + esc(user(juezDe(r)).nombre) + '</p>' +
+      (fotos.length ? '<div class="gallery">' + fotos.map(thumb).join("") + '</div>' : "") +
+      '</section>';
+  }
+
+  function photoItem(f, r, soyJuez, participo) {
     var u = user(f.usuario_id), v = votosDe(f.id), mia = f.usuario_id === me.id, ok = f.estado === "aceptada";
     var acciones = "";
     if (soyJuez) {
       acciones = (ok ? "" : '<button class="btn small" data-act="aceptar" data-id="' + f.id + '">✅ Aceptar</button>') +
         '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">🗑️ Eliminar</button>';
-    } else if (!mia) {
+    } else if (participo && !mia) {
       acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">👍 Aceptar</button>' +
         '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">🚩 Denunciar</button>';
     }
@@ -464,23 +544,10 @@
     return '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"><span>' + esc(u.avatar) + '</span></button>';
   }
 
-  function renderLastResult() {
-    var last = data.retos[0];
-    if (!last || last.estado !== "terminado") return "";
-    var w = last.ganador_id ? user(last.ganador_id) : null;
-    var thumbs = data.fotos.filter(function (f) { return f.reto_id === last.id && f.estado === "aceptada"; });
-    return '<section class="card result">' +
-      '<div class="tag">Último reto · ' + esc(last.emoji) + " " + last.meta + " · " + esc(last.que_buscar) + '</div>' +
-      (w ? '<div class="big-emoji">🏆' + esc(w.avatar) + '</div><h2>¡Ganó ' + esc(w.nombre) + '!</h2>' +
-           '<p class="sub">' + (last.motivo === "meta" ? "Llegó primero a la meta con fotos aceptadas" : "Se acabó el tiempo y tenía más fotos aceptadas") + '</p>'
-         : '<div class="big-emoji">⏰</div><h2>Se acabó el tiempo</h2><p class="sub">Nadie tenía fotos aceptadas</p>') +
-      (thumbs.length ? '<div class="gallery">' + thumbs.map(thumb).join("") + '</div>' : "") +
-      '</section>';
-  }
-
   function renderNewForm() {
     if (!draft.juez || !data.usuarios.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
-    return '<section class="card">' +
+    return '<button class="btn ghost back-btn" id="backList">← Volver a los retos</button>' +
+      '<section class="card">' +
       '<h2>🎯 Crear un reto nuevo</h2>' +
       '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
       '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
@@ -499,7 +566,16 @@
       '<div class="chips" id="judges">' + data.usuarios.map(function (u) {
         return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '">' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + '</button>';
       }).join("") + '</div>' +
-      '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto a todos!</button>' +
+      '<p class="label">👥 ¿Para quién es el reto?</p>' +
+      '<div class="seg" id="forWho"><button type="button" data-todos="1" class="' + (draft.todos ? "on" : "") + '">Para todos</button>' +
+      '<button type="button" data-todos="0" class="' + (draft.todos ? "" : "on") + '">Solo para algunos</button></div>' +
+      '<div id="partsBox"' + (draft.todos ? " hidden" : "") + '><p class="hint">Toca a los que participan (el juez no compite):</p>' +
+      '<div class="chips" id="parts">' + data.usuarios.map(function (u) {
+        var esJuez = u.id === draft.juez;
+        return '<button type="button" class="chip' + (draft.parts.indexOf(u.id) >= 0 && !esJuez ? " on" : "") + (esJuez ? " disabled" : "") + '" data-p="' + u.id + '"' + (esJuez ? " disabled" : "") + '>' +
+          esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + (esJuez ? " · juez" : "") + '</button>';
+      }).join("") + '</div></div>' +
+      '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto!</button>' +
       '</section>';
   }
 
@@ -529,20 +605,27 @@
     return '<section class="card"><h2>📜 Retos anteriores</h2><ul class="history">' +
       done.map(function (r) {
         var w = r.ganador_id ? user(r.ganador_id) : null;
-        return '<li><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + " · juez " + esc(user(juezDe(r)).nombre) + '</small></span>' +
-          '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "🏆 " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + '</span></li>';
+        return '<li><button class="hist-item" data-open="' + r.id + '"><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + " · juez " + esc(user(juezDe(r)).nombre) + '</small></span>' +
+          '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "🏆 " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + ' ›</span></button></li>';
       }).join("") + '</ul></section>';
   }
 
+  function openReto(id) { sel = id; creating = false; window.scrollTo(0, 0); reload(); render(); }
+  function backToList() { sel = null; creating = false; render(); window.scrollTo(0, 0); }
+
   function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
-    if (r) {
+    $app.querySelectorAll("[data-open]").forEach(function (b) { b.onclick = function () { openReto(b.dataset.open); }; });
+    if (el("backList")) el("backList").onclick = backToList;
+    if (el("newReto")) el("newReto").onclick = function () { creating = true; sel = null; render(); window.scrollTo(0, 0); };
+    if (r && !creating) {
       if (el("shot")) el("shot").onclick = function () { openCamera(r); };
       $app.querySelectorAll("[data-act]").forEach(function (b) {
         b.onclick = function () { photoAction(b.dataset.act, b.dataset.id); };
       });
       return;
     }
+    if (!creating) return;
     el("presets").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b) return;
       draft.emoji = b.dataset.e; draft.que = b.dataset.q;
@@ -565,14 +648,33 @@
     el("judges").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b) return;
       draft.juez = b.dataset.j;
-      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+      draft.parts = draft.parts.filter(function (x) { return x !== draft.juez; });
+      render();   // actualiza la lista de participantes (el juez no compite)
+    };
+    el("forWho").onclick = function (e) {
+      var b = e.target.closest("button"); if (!b) return;
+      draft.todos = b.dataset.todos === "1";
+      if (!draft.todos && !draft.parts.length && draft.juez !== me.id) draft.parts = [me.id];
+      render();
+    };
+    el("parts").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b || b.disabled) return;
+      var id = b.dataset.p, i = draft.parts.indexOf(id);
+      if (i >= 0) draft.parts.splice(i, 1); else draft.parts.push(id);
+      b.classList.toggle("on", i < 0);
     };
     el("launch").onclick = function () {
       if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
+      var parts = draft.parts.filter(function (x) { return x !== draft.juez; });
+      if (!draft.todos && !parts.length) return toast(ERRORS.sin_participantes);
       guard(async function () {
-        must(await db.rpc("crear_reto", { p_token: token, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min, p_juez: draft.juez }));
+        var nuevo = must(await db.rpc("crear_reto", {
+          p_token: token, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min,
+          p_juez: draft.juez, p_para_todos: draft.todos, p_participantes: draft.todos ? null : parts
+        }));
         say("¡Reto lanzado! Gana el primero en conseguir " + draft.meta + " fotos de " + draft.que);
-        draft.que = "";
+        draft.que = ""; draft.parts = []; draft.todos = true;
+        creating = false; sel = nuevo.id;
         await reload();
       });
     };
@@ -714,11 +816,14 @@
 
   // ------------------------------------------------------------ celebración
   function celebrateIfNew(prev) {
-    var last = data.retos[0];
-    if (!me || !last || last.estado !== "terminado") return;
     var seen = load(SEEN_KEY) || [];
-    if (seen.indexOf(last.id) >= 0) return;
-    seen.push(last.id); save(SEEN_KEY, seen.slice(-50));
+    var nuevos = data.retos.filter(function (r) {
+      return r.estado === "terminado" && seen.indexOf(r.id) < 0 && (compite(r, me.id) || juezDe(r) === me.id);
+    }).sort(function (a, b) { return new Date(b.cerrado_en) - new Date(a.cerrado_en); });
+    if (!nuevos.length) return;
+    nuevos.forEach(function (r) { seen.push(r.id); });
+    save(SEEN_KEY, seen.slice(-100));
+    var last = nuevos[0];
     if (!prev && Date.now() - new Date(last.cerrado_en) > 6 * 3600000) return;
     var w = last.ganador_id ? user(last.ganador_id) : null;
     var mine = data.puntajes.filter(function (p) { return p.reto_id === last.id && p.usuario_id === me.id; })[0];
