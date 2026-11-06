@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#fef6e4">
   <title>Retos en familia</title>
-  <link rel="stylesheet" href="css/retos.css?v=5">
+  <link rel="stylesheet" href="css/retos.css?v=6">
 </head>
 <body>
 
@@ -17,6 +17,12 @@
   </div>
   <button id="meBtn" class="me" hidden aria-label="Mi perfil"></button>
 </header>
+
+<nav id="tabs" class="tabs" hidden>
+  <button data-tab="retos">🎯<span>Retos</span></button>
+  <button data-tab="usuarios">👥<span>Usuarios</span></button>
+  <button data-tab="admin">🛡️<span>Administrador</span></button>
+</nav>
 
 <div id="offline" class="offline" hidden>Sin conexión… reintentando</div>
 
@@ -67,6 +73,6 @@
 
 <script src="js/vendor/supabase-2.45.4.js"></script>
 <script src="js/retos-config.js?v=3"></script>
-<script src="js/retos.js?v=5"></script>
+<script src="js/retos.js?v=6"></script>
 </body>
 </html>

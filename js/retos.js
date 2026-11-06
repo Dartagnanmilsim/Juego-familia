@@ -1,6 +1,10 @@
 // Retos en familia
-// Módulos: Usuarios (crear cuenta / entrar), Retos (jugar con fotos en el momento)
-// y Administrador (clave propia: elimina usuarios y retos, cancela retos, restablece claves).
+// Tres módulos:
+//  - Usuarios: crear usuarios, entrar, perfil y lista de jugadores.
+//  - Retos: crear retos (con un juez), hacer fotos en el momento y marcar las fotos
+//    de otros con "aceptar" o "denunciar". El juez de cada reto acepta o elimina fotos;
+//    solo cuentan las aceptadas.
+//  - Administrador (con clave): elimina usuarios y retos y restablece claves.
 (function () {
   "use strict";
 
@@ -26,7 +30,11 @@
     clave_admin_incorrecta: "Clave de administrador incorrecta.",
     ya_hay_reto_activo: "Ya hay un reto en marcha. Terminadlo primero.",
     reto_cerrado: "El reto ya se cerró. ¡Alguien llegó antes o se acabó el tiempo!",
-    solo_quien_creo_el_reto: "Solo quien creó el reto puede cancelarlo.",
+    el_juez_no_compite: "Eres el juez de este reto: no puedes subir fotos.",
+    solo_el_juez: "Solo el juez de este reto puede hacer eso.",
+    no_puedes_votar_tu_foto: "No puedes marcar tus propias fotos.",
+    juez_no_existe: "El juez elegido ya no existe. Elige otro.",
+    foto_no_existe: "Esa foto ya no existe.",
     duracion_invalida: "Elige una duración válida.",
     usuario_no_existe: "Ese usuario ya no existe.",
     reto_no_existe: "Ese reto ya no existe."
@@ -37,11 +45,12 @@
   var db = null;
   var token = load(TOKEN_KEY);
   var me = null;                 // usuario con sesión iniciada
-  var view = "login";            // login | registro | juego | perfil | admin-login | admin
+  var view = "login";            // login | registro | retos | usuarios | admin-login | admin
   var adminClave = null;         // solo en memoria
   var data = null;               // { usuarios, retos, puntajes, fotos }
   var busy = false;
-  var draft = { emoji: "🎯", que: "", meta: 10, min: 60 };
+  var draft = { emoji: "🎯", que: "", meta: 10, min: 60, juez: null };
+  var newUser = null;            // formulario "crear usuario para otra persona"
   var channel = null, pollTimer = null, tickTimer = null, reloadTimer = null;
 
   // ------------------------------------------------------------ utilidades
@@ -69,6 +78,7 @@
   function user(id) {
     return (data && data.usuarios.filter(function (u) { return u.id === id; })[0]) || { nombre: "Alguien", avatar: "🙂", usuario: "" };
   }
+  function juezDe(r) { return r ? (r.juez_id || r.creado_por) : null; }
   function activeReto() { return data && data.retos.filter(function (r) { return r.estado === "activo"; })[0]; }
   function fmtLeft(ms) {
     if (ms <= 0) return "¡Tiempo!";
@@ -106,11 +116,21 @@
     };
   }
   function setHeader() {
-    el("barTitle").textContent = view.indexOf("admin") === 0 ? "🛡️ Administrador" : "Retos en familia";
-    el("barSub").hidden = !(me && (view === "juego" || view === "perfil"));
-    el("barSub").textContent = me ? "@" + me.usuario : "";
-    el("meBtn").hidden = !(me && (view === "juego" || view === "perfil"));
-    if (me) el("meBtn").textContent = me.avatar;
+    var logged = !!me, inApp = view === "retos" || view === "usuarios" || view === "admin" || view === "admin-login";
+    el("barTitle").textContent = { retos: "🎯 Retos", usuarios: "👥 Usuarios", admin: "🛡️ Administrador", "admin-login": "🛡️ Administrador" }[view] || "Retos en familia";
+    el("barSub").hidden = !logged;
+    el("barSub").textContent = logged ? "@" + me.usuario : "";
+    el("meBtn").hidden = !logged;
+    if (logged) el("meBtn").textContent = me.avatar;
+    el("tabs").hidden = !(logged && inApp);
+    [].forEach.call(document.querySelectorAll("#tabs [data-tab]"), function (b) {
+      var t = b.dataset.tab;
+      b.classList.toggle("on", t === view || (t === "admin" && view === "admin-login"));
+    });
+  }
+  function goTab(t) {
+    if (t === "admin") { view = adminClave ? "admin" : "admin-login"; render(); return; }
+    view = t; render(); window.scrollTo(0, 0);
   }
 
   // ------------------------------------------------------------ arranque
@@ -120,7 +140,8 @@
       return;
     }
     db = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } });
-    el("meBtn").onclick = function () { view = "perfil"; render(); };
+    el("meBtn").onclick = function () { goTab("usuarios"); };
+    [].forEach.call(document.querySelectorAll("#tabs [data-tab]"), function (b) { b.onclick = function () { goTab(b.dataset.tab); }; });
     if (token) {
       try {
         me = must(await db.rpc("yo", { p_token: token }));
@@ -140,7 +161,7 @@
     if (view === "admin-login") return renderAdminLogin();
     if (!data) { $app.innerHTML = '<p class="loading">Cargando…</p>'; return; }
     if (view === "admin") return renderAdmin();
-    if (view === "perfil") return renderProfile();
+    if (view === "usuarios") return renderUsers();
     return renderGame();
   }
 
@@ -211,9 +232,27 @@
     if (expired) toast(ERRORS.sesion_invalida);
   }
 
-  function renderProfile() {
+  function renderUsers() {
     var p = { avatar: me.avatar };
+    var pts = {}, wins = {};
+    data.puntajes.forEach(function (x) { pts[x.usuario_id] = (pts[x.usuario_id] || 0) + x.puntos; if (x.puesto === 1) wins[x.usuario_id] = (wins[x.usuario_id] || 0) + 1; });
+    var nu = newUser;
     $app.innerHTML =
+      '<section class="card"><h2>Jugadores (' + data.usuarios.length + ')</h2>' +
+      '<ul class="admin-list">' + data.usuarios.map(function (u) {
+        return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><div class="admin-info"><b>' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (tú)" : "") + '</b>' +
+          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts" + (wins[u.id] ? " · 🏆×" + wins[u.id] : "") + '</small></div></li>';
+      }).join("") + '</ul>' +
+      (nu
+        ? '<form id="nuForm" class="stack-form new-user"><h3>Crear usuario para otra persona</h3>' +
+          '<input id="nuUser" autocapitalize="none" spellcheck="false" maxlength="20" placeholder="Usuario (ej: abuela)" required value="' + esc(nu.usuario) + '">' +
+          '<input id="nuName" maxlength="30" placeholder="Nombre que verá la familia" required value="' + esc(nu.nombre) + '">' +
+          '<input id="nuPass" type="password" autocomplete="new-password" placeholder="Clave (mínimo 4)" required>' +
+          '<p class="label">Avatar</p>' + avatarPicker("nuAvatars", nu.avatar) +
+          '<div class="row"><button type="button" class="btn ghost" id="nuCancel">Cancelar</button><button class="btn primary">Crear usuario</button></div>' +
+          '<p class="hint">Dale a esa persona su usuario y su clave para que entre desde su móvil.</p></form>'
+        : '<button class="btn wide" id="nuOpen">➕ Crear usuario para otra persona</button>') +
+      '<button class="btn ghost wide" id="invite">📤 Compartir el enlace del juego</button></section>' +
       '<section class="card"><h2>Mi perfil</h2>' +
       '<p class="sub">Usuario: <b>@' + esc(me.usuario) + '</b></p>' +
       '<form id="profForm" class="stack-form">' +
@@ -226,14 +265,30 @@
       '<input id="pOld" type="password" autocomplete="current-password" placeholder="Clave actual" required>' +
       '<input id="pNew" type="password" autocomplete="new-password" placeholder="Clave nueva" required>' +
       '<button class="btn wide">Cambiar clave</button></form></section>' +
-      '<button class="btn wide" id="back">← Volver a los retos</button>' +
       '<button class="btn ghost wide" id="logout">Cerrar sesión</button>';
+    el("invite").onclick = invite;
+    if (el("nuOpen")) el("nuOpen").onclick = function () { newUser = { usuario: "", nombre: "", avatar: AVATARS[0] }; renderUsers(); el("nuUser").focus(); };
+    if (el("nuForm")) {
+      el("nuUser").oninput = function () { newUser.usuario = this.value; };
+      el("nuName").oninput = function () { newUser.nombre = this.value; };
+      bindAvatarPicker("nuAvatars", function (a) { newUser.avatar = a; });
+      el("nuCancel").onclick = function () { newUser = null; renderUsers(); };
+      el("nuForm").onsubmit = function (e) {
+        e.preventDefault();
+        guard(async function () {
+          var res = must(await db.rpc("registrar_usuario", { p_usuario: newUser.usuario, p_clave: el("nuPass").value, p_nombre: newUser.nombre, p_avatar: newUser.avatar }));
+          db.rpc("cerrar_sesion", { p_token: res.token });   // tú sigues con tu sesión
+          toast("Usuario @" + res.usuario.usuario + " creado");
+          newUser = null; await reload();
+        });
+      };
+    }
     bindAvatarPicker("pAvatars", function (a) { p.avatar = a; });
     el("profForm").onsubmit = function (e) {
       e.preventDefault();
       guard(async function () {
         me = must(await db.rpc("editar_perfil", { p_token: token, p_nombre: el("pName").value, p_avatar: p.avatar }));
-        toast("Perfil guardado"); view = "juego"; await reload();
+        toast("Perfil guardado"); await reload();
       });
     };
     el("passForm").onsubmit = function (e) {
@@ -243,13 +298,12 @@
         toast("Clave cambiada"); el("passForm").reset();
       });
     };
-    el("back").onclick = function () { view = "juego"; render(); };
     el("logout").onclick = function () { logout(false); };
   }
 
   // ============================================================ DATOS EN VIVO
   async function enterGame() {
-    view = "juego"; data = null; render();
+    view = "retos"; data = null; render();
     await reload();
     startLive();
   }
@@ -262,9 +316,15 @@
         db.from("retos").select("*").order("inicia_en", { ascending: false }).limit(50),
         db.from("puntajes").select("*")
       ]);
-      var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), fotos: [] };
+      var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), fotos: [], votos: [] };
       var focus = next.retos.filter(function (x) { return x.estado === "activo"; })[0] || next.retos[0];
-      if (focus) next.fotos = must(await db.from("fotos").select("*").eq("reto_id", focus.id).order("creado_en", { ascending: false }));
+      if (focus) {
+        var fv = await Promise.all([
+          db.from("fotos").select("*").eq("reto_id", focus.id).order("creado_en", { ascending: false }),
+          db.from("votos").select("*").eq("reto_id", focus.id)
+        ]);
+        next.fotos = must(fv[0]); next.votos = must(fv[1]);
+      }
       if (me) {
         var fresh = next.usuarios.filter(function (u) { return u.id === me.id; })[0];
         if (!fresh) { data = next; logout(true); return; }   // el administrador eliminó este usuario
@@ -273,10 +333,9 @@
       el("offline").hidden = true;
       var prev = data;
       data = next;
-      if (view === "juego" || view === "perfil" || view === "admin") {
-        if (view === "juego") celebrateIfNew(prev);
-        if (!(view === "perfil" && prev)) render();   // no borrar lo que se escribe en el perfil
-      }
+      if (me) celebrateIfNew(prev);
+      if (view === "retos" || view === "admin") render();
+      else if (view === "usuarios" && !prev) render();   // no borrar lo que se escribe en Usuarios
     } catch (e) {
       el("offline").hidden = false;
       if (!data) $app.innerHTML = '<section class="card"><p>' + esc(errMsg(e)) + '</p><button class="btn" id="retry">Reintentar</button></section>';
@@ -289,7 +348,7 @@
   function startLive() {
     stopLive();
     channel = db.channel("retos-en-familia");
-    ["usuarios", "retos", "fotos", "puntajes"].forEach(function (t) {
+    ["usuarios", "retos", "fotos", "puntajes", "votos"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     });
     channel.subscribe();
@@ -301,7 +360,7 @@
     clearInterval(pollTimer); clearInterval(tickTimer);
   }
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden && data && (view === "juego" || view === "admin")) reload();
+    if (!document.hidden && data && (view === "retos" || view === "admin" || view === "usuarios")) reload();
   });
 
   function updateClock() {
@@ -313,10 +372,24 @@
     if (left <= 0 && !updateClock.asked) { updateClock.asked = true; setTimeout(function () { updateClock.asked = false; reload(); }, 1500); }
   }
 
+  // Fotos por jugador en un reto: aceptadas y pendientes
   function counts(retoId) {
     var c = {};
-    data.fotos.forEach(function (f) { if (f.reto_id === retoId) c[f.usuario_id] = (c[f.usuario_id] || 0) + 1; });
+    data.fotos.forEach(function (f) {
+      if (f.reto_id !== retoId) return;
+      var x = c[f.usuario_id] || (c[f.usuario_id] = { ok: 0, pend: 0 });
+      if (f.estado === "aceptada") x.ok++; else x.pend++;
+    });
     return c;
+  }
+  function votosDe(fotoId) {
+    var v = { acepta: 0, denuncia: 0, mio: null };
+    data.votos.forEach(function (x) {
+      if (x.foto_id !== fotoId) return;
+      v[x.tipo]++;
+      if (me && x.usuario_id === me.id) v.mio = x.tipo;
+    });
+    return v;
   }
 
   // ============================================================ MÓDULO RETOS
@@ -330,29 +403,60 @@
   }
 
   function renderActive(r) {
-    var c = counts(r.id), mine = c[me.id] || 0;
-    var rows = data.usuarios.slice().sort(function (a, b) { return (c[b.id] || 0) - (c[a.id] || 0); });
-    var thumbs = data.fotos.filter(function (f) { return f.reto_id === r.id; });
-    var creator = user(r.creado_por);
+    var c = counts(r.id), juez = user(juezDe(r)), soyJuez = juezDe(r) === me.id;
+    var mine = c[me.id] || { ok: 0, pend: 0 };
+    var competidores = data.usuarios.filter(function (u) { return u.id !== juezDe(r); })
+      .sort(function (a, b) { return ((c[b.id] || {}).ok || 0) - ((c[a.id] || {}).ok || 0); });
+    var fotos = data.fotos.filter(function (f) { return f.reto_id === r.id; });
+    if (soyJuez) fotos.sort(function (a, b) {   // al juez: primero pendientes y las más denunciadas
+      var pa = a.estado === "aceptada" ? 1 : 0, pb = b.estado === "aceptada" ? 1 : 0;
+      return pa - pb || votosDe(b.id).denuncia - votosDe(a.id).denuncia || new Date(a.creado_en) - new Date(b.creado_en);
+    });
+    var pendientes = fotos.filter(function (f) { return f.estado !== "aceptada"; }).length;
     return '<section class="card active">' +
       '<div class="tag">🔥 Reto en marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
-      '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
-      '<p class="sub">Lo lanzó ' + esc(creator.avatar + " " + creator.nombre) + '</p>' +
+      '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
+      '<p class="sub">⚖️ Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '</p>' +
       '<div class="clock-wrap">⏱️ <span id="clock"></span></div>' +
-      '<div class="mine"><b>' + mine + '</b> / ' + r.meta + '<small>tus fotos</small></div>' +
-      '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
-      '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego.</p>' +
-      '<ul class="race">' + rows.map(function (u) {
-        var n = c[u.id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
+      (soyJuez
+        ? '<div class="judge-box"><b>⚖️ Eres el juez de este reto</b>No compites. Revisa las fotos: ✅ acepta las que valen y 🗑️ elimina las que no. ' +
+          'Solo cuentan las que aceptes.<div class="judge-count">' + pendientes + ' foto' + (pendientes === 1 ? "" : "s") + ' por revisar</div></div>'
+        : '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas' + (mine.pend ? " · " + mine.pend + " esperando al juez" : "") + '</small></div>' +
+          '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
+          '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego. El juez decide si cuentan.</p>') +
+      '<ul class="race">' + competidores.map(function (u) {
+        var x = c[u.id] || { ok: 0, pend: 0 }, pct = Math.min(100, Math.round(x.ok / r.meta * 100));
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '>' +
           '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
           '<span class="track"><i style="width:' + pct + '%"></i></span>' +
-          '<span class="n">' + n + "/" + r.meta + '</span></li>';
+          '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + '⏳</small>' : "") + '</span></li>';
       }).join("") + '</ul>' +
-      (thumbs.length ? '<h3>Fotos del reto</h3><p class="hint">Toca una foto para verla. Si no aplica, se puede borrar.</p><div class="gallery">' + thumbs.map(thumb).join("") + '</div>' : "") +
-      (r.creado_por === me.id ? '<button class="btn ghost" id="cancel">Cancelar reto</button>' : "") +
+      '</section>' +
+      '<section class="card"><h2>📷 Fotos del reto (' + fotos.length + ')</h2>' +
+      (fotos.length
+        ? (soyJuez ? "" : '<p class="hint">Si una foto de otro jugador vale, márcala 👍. Si no vale, 🚩 denúnciala. El juez lo verá.</p>') +
+          '<ul class="photo-list">' + fotos.map(function (f) { return photoItem(f, r, soyJuez); }).join("") + '</ul>'
+        : '<p class="hint">Todavía no hay fotos.</p>') +
       '</section>';
+  }
+
+  function photoItem(f, r, soyJuez) {
+    var u = user(f.usuario_id), v = votosDe(f.id), mia = f.usuario_id === me.id, ok = f.estado === "aceptada";
+    var acciones = "";
+    if (soyJuez) {
+      acciones = (ok ? "" : '<button class="btn small" data-act="aceptar" data-id="' + f.id + '">✅ Aceptar</button>') +
+        '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">🗑️ Eliminar</button>';
+    } else if (!mia) {
+      acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">👍 Aceptar</button>' +
+        '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">🚩 Denunciar</button>';
+    }
+    return '<li class="photo-item' + (v.denuncia ? " reported" : "") + '">' +
+      '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"></button>' +
+      '<div class="photo-info"><b>' + esc(u.avatar + " " + u.nombre) + (mia ? " (tú)" : "") + '</b>' +
+      '<span class="badge ' + (ok ? "ok" : "pend") + '">' + (ok ? "✅ Aceptada por el juez" : "⏳ Esperando al juez") + '</span>' +
+      '<small>👍 ' + v.acepta + ' · 🚩 ' + v.denuncia + ' · ' + fmtDate(f.creado_en) + '</small>' +
+      (acciones ? '<div class="photo-actions">' + acciones + '</div>' : "") + '</div></li>';
   }
 
   function thumb(f) {
@@ -364,17 +468,18 @@
     var last = data.retos[0];
     if (!last || last.estado !== "terminado") return "";
     var w = last.ganador_id ? user(last.ganador_id) : null;
-    var thumbs = data.fotos.filter(function (f) { return f.reto_id === last.id; });
+    var thumbs = data.fotos.filter(function (f) { return f.reto_id === last.id && f.estado === "aceptada"; });
     return '<section class="card result">' +
       '<div class="tag">Último reto · ' + esc(last.emoji) + " " + last.meta + " · " + esc(last.que_buscar) + '</div>' +
       (w ? '<div class="big-emoji">🏆' + esc(w.avatar) + '</div><h2>¡Ganó ' + esc(w.nombre) + '!</h2>' +
-           '<p class="sub">' + (last.motivo === "meta" ? "Llegó primero a la meta" : "Se acabó el tiempo y tenía más fotos") + '</p>'
-         : '<div class="big-emoji">⏰</div><h2>Se acabó el tiempo</h2><p class="sub">Nadie hizo fotos esta vez</p>') +
+           '<p class="sub">' + (last.motivo === "meta" ? "Llegó primero a la meta con fotos aceptadas" : "Se acabó el tiempo y tenía más fotos aceptadas") + '</p>'
+         : '<div class="big-emoji">⏰</div><h2>Se acabó el tiempo</h2><p class="sub">Nadie tenía fotos aceptadas</p>') +
       (thumbs.length ? '<div class="gallery">' + thumbs.map(thumb).join("") + '</div>' : "") +
       '</section>';
   }
 
   function renderNewForm() {
+    if (!draft.juez || !data.usuarios.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
     return '<section class="card">' +
       '<h2>🎯 Crear un reto nuevo</h2>' +
       '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
@@ -384,11 +489,15 @@
       '<div class="chips" id="presets">' + PRESETS.map(function (p) {
         return '<button type="button" class="chip' + (p.que === draft.que ? " on" : "") + '" data-e="' + p.emoji + '" data-q="' + esc(p.que) + '">' + p.emoji + " " + esc(p.que) + '</button>';
       }).join("") + '</div>' +
-      '<p class="label">¿Cuántas fotos hacen falta para ganar?</p>' +
+      '<p class="label">¿Cuántas fotos aceptadas hacen falta para ganar?</p>' +
       '<div class="stepper"><button type="button" class="btn" data-d="-1">−</button><b id="rMeta">' + draft.meta + '</b><button type="button" class="btn" data-d="1">+</button></div>' +
       '<p class="label">¿Cuánto dura el reto?</p>' +
       '<div class="chips" id="durs">' + DURATIONS.map(function (d) {
         return '<button type="button" class="chip' + (d.min === draft.min ? " on" : "") + '" data-m="' + d.min + '">' + d.label + '</button>';
+      }).join("") + '</div>' +
+      '<p class="label">⚖️ ¿Quién es el juez? (acepta o elimina las fotos y no compite)</p>' +
+      '<div class="chips" id="judges">' + data.usuarios.map(function (u) {
+        return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '">' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + '</button>';
       }).join("") + '</div>' +
       '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto a todos!</button>' +
       '</section>';
@@ -410,8 +519,7 @@
           '<span class="wins">' + (wins[u.id] ? "🏆×" + wins[u.id] : "") + '</span>' +
           '<span class="pts">' + (pts[u.id] || 0) + ' pts</span></li>';
       }).join("") + '</ol>' +
-      '<p class="hint">Cada reto: 1º 3 pts · 2º 2 pts · 3º 1 pt. Para sumar a alguien, que abra este enlace y cree su usuario.</p>' +
-      '<button class="btn ghost wide" id="invite">📤 Compartir el enlace del juego</button>' +
+      '<p class="hint">Cada reto: 1º 3 pts · 2º 2 pts · 3º 1 pt (solo cuentan fotos aceptadas por el juez).</p>' +
       '</section>';
   }
 
@@ -421,20 +529,18 @@
     return '<section class="card"><h2>📜 Retos anteriores</h2><ul class="history">' +
       done.map(function (r) {
         var w = r.ganador_id ? user(r.ganador_id) : null;
-        return '<li><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + '</small></span>' +
+        return '<li><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + " · juez " + esc(user(juezDe(r)).nombre) + '</small></span>' +
           '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "🏆 " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + '</span></li>';
       }).join("") + '</ul></section>';
   }
 
   function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
-    el("invite").onclick = invite;
     if (r) {
-      el("shot").onclick = function () { openCamera(r); };
-      if (el("cancel")) el("cancel").onclick = function () {
-        if (!confirm("¿Cancelar el reto para todos? No se repartirán puntos.")) return;
-        guard(async function () { must(await db.rpc("cancelar_reto", { p_token: token, p_reto: r.id })); await reload(); });
-      };
+      if (el("shot")) el("shot").onclick = function () { openCamera(r); };
+      $app.querySelectorAll("[data-act]").forEach(function (b) {
+        b.onclick = function () { photoAction(b.dataset.act, b.dataset.id); };
+      });
       return;
     }
     el("presets").onclick = function (e) {
@@ -456,15 +562,44 @@
       draft.min = Number(b.dataset.m);
       [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
     };
+    el("judges").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      draft.juez = b.dataset.j;
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+    };
     el("launch").onclick = function () {
       if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
       guard(async function () {
-        must(await db.rpc("crear_reto", { p_token: token, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min }));
+        must(await db.rpc("crear_reto", { p_token: token, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min, p_juez: draft.juez }));
         say("¡Reto lanzado! Gana el primero en conseguir " + draft.meta + " fotos de " + draft.que);
         draft.que = "";
         await reload();
       });
     };
+  }
+
+  // Acciones sobre fotos: el juez acepta/elimina; los competidores marcan 👍 o 🚩
+  function photoAction(act, id) {
+    var f = data.fotos.filter(function (x) { return x.id === id; })[0];
+    if (!f) return;
+    var u = user(f.usuario_id);
+    if (act === "eliminar") {
+      if (!confirm("¿Eliminar esta foto de " + u.nombre + "? Dejará de contar y no se puede deshacer.")) return;
+      return guard(async function () { must(await db.rpc("juez_eliminar_foto", { p_token: token, p_foto: id })); toast("Foto eliminada"); await reload(); });
+    }
+    if (act === "aceptar") {
+      return guard(async function () {
+        var res = must(await db.rpc("juez_aceptar_foto", { p_token: token, p_foto: id }));
+        toast(res.gano ? "¡" + u.nombre + " llegó a la meta y gana el reto!" : "Foto aceptada: " + u.nombre + " lleva " + res.aceptadas);
+        await reload();
+      });
+    }
+    var v = votosDe(id), tipo = v.mio === act ? null : act;   // tocar otra vez quita la marca
+    guard(async function () {
+      must(await db.rpc("votar_foto", { p_token: token, p_foto: id, p_tipo: tipo }));
+      if (tipo === "denuncia") toast("Foto denunciada. El juez la revisará.");
+      await reload();
+    });
   }
 
   function invite() {
@@ -553,11 +688,8 @@
       var ruta = r.id + "/" + me.id + "/" + Date.now() + ".jpg";
       must(await db.storage.from(BUCKET).upload(ruta, blob, { contentType: "image/jpeg", upsert: false }));
       var res = must(await db.rpc("registrar_foto", { p_token: token, p_reto: r.id, p_ruta: ruta }));
-      if (!res.ganaste) {
-        var left = r.meta - res.fotos;
-        toast("¡Bien! " + res.fotos + " de " + r.meta + (left === 1 ? " · ¡te falta solo una!" : ""));
-        say(left === 1 ? "¡Te falta solo una!" : "¡Llevas " + res.fotos + "!");
-      }
+      toast("📸 Foto enviada. Tienes " + res.aceptadas + " aceptada" + (res.aceptadas === 1 ? "" : "s") + "; el juez revisará la nueva.");
+      say("¡Foto enviada!");
     } catch (e) {
       if (String(e && e.message).indexOf("sesion_invalida") >= 0) { busy = false; return logout(true); }
       toast(errMsg(e), 4500);
@@ -570,18 +702,10 @@
   function openViewer(id) {
     var f = data.fotos.filter(function (x) { return x.id === id; })[0];
     if (!f) return;
-    var u = user(f.usuario_id), r = activeReto();
+    var u = user(f.usuario_id);
     el("viewerImg").src = photoUrl(f.ruta);
-    el("viewerCaption").textContent = u.avatar + " " + u.nombre + " · " + fmtDate(f.creado_en);
-    el("viewerDelete").hidden = !(me && r && r.id === f.reto_id);
-    el("viewerDelete").onclick = function () {
-      var mine = f.usuario_id === me.id;
-      if (!confirm(mine ? "¿Borrar tu foto? Dejará de contar." : "¿Borrar la foto de " + u.nombre + " porque no aplica? Dejará de contar.")) return;
-      guard(async function () {
-        must(await db.rpc("borrar_foto", { p_token: token, p_foto: f.id }));
-        closeViewer(); await reload();
-      });
-    };
+    el("viewerCaption").textContent = u.avatar + " " + u.nombre + " · " + (f.estado === "aceptada" ? "✅ aceptada" : "⏳ esperando al juez") + " · " + fmtDate(f.creado_en);
+    el("viewerDelete").hidden = true;
     el("viewer").hidden = false;
   }
   function closeViewer() { el("viewer").hidden = true; el("viewerImg").src = ""; }
@@ -621,24 +745,24 @@
 
   // ============================================================ MÓDULO ADMINISTRADOR
   function renderAdminLogin() {
-    stopLive();
+    if (!me) stopLive();
     $app.innerHTML =
       '<section class="card admin"><div class="tag admin-tag">🛡️ Administrador</div>' +
       '<h2>Entrar al módulo de administrador</h2>' +
-      '<p class="sub">Desde aquí se eliminan usuarios y retos, se cancelan retos y se restablecen claves.</p>' +
+      '<p class="sub">Desde aquí se eliminan usuarios y retos y se restablecen claves.</p>' +
       '<form id="admForm" class="stack-form">' +
       '<input id="admPass" type="password" autocomplete="off" placeholder="Clave de administrador" required>' +
       '<button class="btn primary wide">Entrar</button></form>' +
-      '<button class="btn ghost wide" id="admBack">← Volver</button></section>';
+      (me ? "" : '<button class="btn ghost wide" id="admBack">← Volver</button>') + '</section>';
     el("admPass").focus();
-    el("admBack").onclick = exitAdmin;
+    if (el("admBack")) el("admBack").onclick = exitAdmin;
     el("admForm").onsubmit = function (e) {
       e.preventDefault();
       var clave = el("admPass").value;
       guard(async function () {
         must(await db.rpc("admin_entrar", { p_clave: clave }));
-        adminClave = clave; view = "admin"; data = null; render();
-        await reload(); startLive();
+        adminClave = clave; view = "admin";
+        if (me && data) render(); else { data = null; render(); await reload(); startLive(); }
         if (clave === "1234") toast("Recuerda cambiar la clave 1234 por una propia (abajo del todo).", 5000);
       });
     };
@@ -650,12 +774,11 @@
     $app.innerHTML =
       '<section class="card admin"><div class="tag admin-tag">🛡️ Módulo de administrador</div>' +
       '<h2>Retos</h2>' +
-      '<p class="hint">Cancelar termina el reto para todos sin repartir puntos. Eliminar lo borra con sus fotos y puntos.</p>' +
+      '<p class="hint">Eliminar un reto lo borra con sus fotos y sus puntos (también si está en marcha).</p>' +
       (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {
         return '<li><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
           '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · " + esc(user(r.creado_por).nombre) + '</small></div>' +
           '<div class="admin-actions">' +
-          (r.estado === "activo" ? '<button class="btn small" data-act="cancel" data-id="' + r.id + '">Cancelar</button>' : "") +
           '<button class="btn small danger" data-act="del-reto" data-id="' + r.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : '<p class="hint">No hay retos.</p>') +
       '</section>' +
@@ -707,18 +830,16 @@
     var r = data.retos.filter(function (x) { return x.id === id; })[0];
     if (!r) return;
     var name = r.meta + " · " + r.que_buscar;
-    if (!confirm(act === "cancel"
-      ? "¿Cancelar el reto «" + name + "» para todos? No se repartirán puntos."
-      : "¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
+    if (!confirm("¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
     guard(async function () {
-      must(await db.rpc(act === "cancel" ? "admin_cancelar_reto" : "admin_eliminar_reto", Object.assign(base, { p_reto: id })));
-      toast(act === "cancel" ? "Reto cancelado" : "Reto eliminado"); await reload();
+      must(await db.rpc("admin_eliminar_reto", Object.assign(base, { p_reto: id })));
+      toast("Reto eliminado"); await reload();
     });
   }
 
   function exitAdmin() {
     adminClave = null;
-    if (me) enterGame(); else { stopLive(); view = "login"; render(); }
+    if (me) { view = "retos"; render(); } else { stopLive(); view = "login"; render(); }
   }
 
   start();

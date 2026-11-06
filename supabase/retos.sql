@@ -7,8 +7,12 @@
 --  Módulos:
 --    Usuarios      -> cada persona crea su cuenta (usuario + clave) e inicia sesión.
 --    Retos         -> "el primero que consiga 10 fotos de perros negros".
+--                     Cada reto tiene un juez (no compite) que acepta o elimina
+--                     las fotos. Solo cuentan las fotos aceptadas por el juez.
+--                     Los competidores pueden marcar fotos ajenas con
+--                     "aceptar" o "denunciar" para avisar al juez.
 --    Administrador -> entra con su clave (al principio 1234) y puede eliminar
---                     usuarios y retos, cancelar retos y restablecer claves.
+--                     usuarios y retos, y restablecer claves.
 --
 --  Las claves se guardan cifradas (bcrypt) en tablas que la app no puede leer.
 --  La app solo lee las tablas públicas; todo lo que escribe pasa por funciones
@@ -71,6 +75,23 @@ create table if not exists public.fotos (
 );
 create index if not exists fotos_reto_idx on public.fotos(reto_id, usuario_id);
 
+alter table public.retos add column if not exists juez_id uuid references public.usuarios(id) on delete set null;
+alter table public.fotos add column if not exists estado text not null default 'pendiente';
+alter table public.fotos add column if not exists aceptada_en timestamptz;
+alter table public.fotos drop constraint if exists fotos_estado_check;
+alter table public.fotos add constraint fotos_estado_check check (estado in ('pendiente', 'aceptada'));
+
+-- Marcas de los competidores sobre fotos ajenas: 'acepta' o 'denuncia' (una por persona y foto).
+create table if not exists public.votos (
+  foto_id    uuid not null references public.fotos(id) on delete cascade,
+  reto_id    uuid not null references public.retos(id) on delete cascade,
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
+  tipo       text not null check (tipo in ('acepta', 'denuncia')),
+  creado_en  timestamptz not null default now(),
+  primary key (foto_id, usuario_id)
+);
+create index if not exists votos_reto_idx on public.votos(reto_id);
+
 create table if not exists public.puntajes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
   usuario_id uuid not null references public.usuarios(id) on delete cascade,
@@ -92,18 +113,21 @@ alter table public.admin_config enable row level security;
 alter table public.retos        enable row level security;
 alter table public.fotos        enable row level security;
 alter table public.puntajes     enable row level security;
+alter table public.votos        enable row level security;
 
 drop policy if exists "leer usuarios" on public.usuarios;
 drop policy if exists "leer retos"    on public.retos;
 drop policy if exists "leer fotos"    on public.fotos;
 drop policy if exists "leer puntajes" on public.puntajes;
+drop policy if exists "leer votos"    on public.votos;
 create policy "leer usuarios" on public.usuarios for select to anon, authenticated using (true);
 create policy "leer retos"    on public.retos    for select to anon, authenticated using (true);
 create policy "leer fotos"    on public.fotos    for select to anon, authenticated using (true);
 create policy "leer puntajes" on public.puntajes for select to anon, authenticated using (true);
+create policy "leer votos"    on public.votos    for select to anon, authenticated using (true);
 
-grant select on public.usuarios, public.retos, public.fotos, public.puntajes to anon, authenticated;
-revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes from anon, authenticated;
+grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos to anon, authenticated;
+revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos from anon, authenticated;
 revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
 
 -- ------------------------------------------------------ funciones internas
@@ -126,7 +150,7 @@ begin
   if h is null or h <> crypt(coalesce(p_clave, ''), h) then raise exception 'clave_admin_incorrecta'; end if;
 end $$;
 
--- Cierra un reto y reparte puntos (1º 3, 2º 2, 3º 1).
+-- Cierra un reto y reparte puntos (1º 3, 2º 2, 3º 1). Solo cuentan las fotos aceptadas por el juez.
 create or replace function public._cerrar_reto(p_reto uuid, p_motivo text, p_ganador uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -146,7 +170,7 @@ begin
     from (
       select usuario_id, count(*)::int as n,
              row_number() over (order by (usuario_id = p_ganador) desc, count(*) desc, max(creado_en) asc)::int as puesto
-        from public.fotos where reto_id = p_reto group by usuario_id
+        from public.fotos where reto_id = p_reto and estado = 'aceptada' group by usuario_id
     ) t;
 
   if v_ganador is null then
@@ -233,58 +257,103 @@ begin
   end loop;
 end $$;
 
-create or replace function public.crear_reto(p_token uuid, p_que text, p_emoji text, p_meta int, p_minutos int)
+-- Las funciones antiguas que ya no se usan
+drop function if exists public.crear_reto(uuid, text, text, int, int);
+drop function if exists public.borrar_foto(uuid, uuid);
+drop function if exists public.cancelar_reto(uuid, uuid);
+drop function if exists public.admin_cancelar_reto(text, uuid);
+
+-- Juez de un reto (si no se eligió, es quien lo creó).
+create or replace function public._juez_de(p_reto uuid)
+returns uuid language sql security definer set search_path = public as $$
+  select coalesce(juez_id, creado_por) from public.retos where id = p_reto;
+$$;
+revoke all on function public._juez_de(uuid) from public, anon, authenticated;
+
+-- Lanza un reto para todos. p_juez: quién revisa las fotos (si es null, el creador).
+create or replace function public.crear_reto(p_token uuid, p_que text, p_emoji text, p_meta int, p_minutos int, p_juez uuid)
 returns public.retos language plpgsql security definer set search_path = public as $$
-declare v uuid := public._usuario_de(p_token); r public.retos;
+declare v uuid := public._usuario_de(p_token); r public.retos; v_juez uuid := coalesce(p_juez, v);
 begin
   if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then raise exception 'duracion_invalida'; end if;
+  if not exists (select 1 from public.usuarios where id = v_juez) then raise exception 'juez_no_existe'; end if;
   perform public.revisar_retos();
   if exists (select 1 from public.retos where estado = 'activo') then raise exception 'ya_hay_reto_activo'; end if;
-  insert into public.retos (creado_por, que_buscar, emoji, meta, termina_en)
-  values (v, trim(p_que), coalesce(nullif(p_emoji, ''), '🎯'), p_meta, now() + make_interval(mins => p_minutos))
+  insert into public.retos (creado_por, juez_id, que_buscar, emoji, meta, termina_en)
+  values (v, v_juez, trim(p_que), coalesce(nullif(p_emoji, ''), '🎯'), p_meta, now() + make_interval(mins => p_minutos))
   returning * into r;
   return r;
 end $$;
 
--- Registra una foto. Si con ella el usuario llega a la meta, gana y cierra el reto.
+-- Un competidor sube una foto. Queda pendiente hasta que el juez la acepte.
 create or replace function public.registrar_foto(p_token uuid, p_reto uuid, p_ruta text)
 returns json language plpgsql security definer set search_path = public as $$
-declare v uuid := public._usuario_de(p_token); r public.retos; n int;
+declare v uuid := public._usuario_de(p_token); r public.retos; n int; a int;
 begin
-  select * into r from public.retos where id = p_reto for update;  -- de uno en uno
+  select * into r from public.retos where id = p_reto for update;
   if r.id is null then raise exception 'reto_no_existe'; end if;
   if r.estado = 'activo' and r.termina_en <= now() then
     perform public._cerrar_reto(p_reto, 'tiempo', null);
     raise exception 'reto_cerrado';
   end if;
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
-
+  if v = coalesce(r.juez_id, r.creado_por) then raise exception 'el_juez_no_compite'; end if;
   insert into public.fotos (reto_id, usuario_id, ruta) values (p_reto, v, p_ruta);
-  select count(*) into n from public.fotos where reto_id = p_reto and usuario_id = v;
-  if n >= r.meta then
-    perform public._cerrar_reto(p_reto, 'meta', v);
-    return json_build_object('fotos', n, 'ganaste', true);
-  end if;
-  return json_build_object('fotos', n, 'ganaste', false);
+  select count(*), count(*) filter (where estado = 'aceptada') into n, a
+    from public.fotos where reto_id = p_reto and usuario_id = v;
+  return json_build_object('fotos', n, 'aceptadas', a);
 end $$;
 
--- Cualquier jugador puede borrar una foto que no aplica mientras el reto sigue activo.
-create or replace function public.borrar_foto(p_token uuid, p_foto uuid)
+-- Un competidor marca la foto de otro: 'acepta', 'denuncia' o null para quitar su marca.
+create or replace function public.votar_foto(p_token uuid, p_foto uuid, p_tipo text)
 returns void language plpgsql security definer set search_path = public as $$
+declare v uuid := public._usuario_de(p_token); f public.fotos; r public.retos;
 begin
-  perform public._usuario_de(p_token);
-  delete from public.fotos f using public.retos r
-   where f.id = p_foto and r.id = f.reto_id and r.estado = 'activo';
+  select * into f from public.fotos where id = p_foto;
+  if f.id is null then raise exception 'foto_no_existe'; end if;
+  select * into r from public.retos where id = f.reto_id;
+  if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
+  if f.usuario_id = v then raise exception 'no_puedes_votar_tu_foto'; end if;
+  if p_tipo is null then
+    delete from public.votos where foto_id = p_foto and usuario_id = v;
+  elsif p_tipo in ('acepta', 'denuncia') then
+    insert into public.votos (foto_id, reto_id, usuario_id, tipo) values (p_foto, f.reto_id, v, p_tipo)
+    on conflict (foto_id, usuario_id) do update set tipo = excluded.tipo, creado_en = now();
+  else
+    raise exception 'voto_invalido';
+  end if;
 end $$;
 
--- Quien creó el reto puede cancelarlo (no reparte puntos).
-create or replace function public.cancelar_reto(p_token uuid, p_reto uuid)
-returns void language plpgsql security definer set search_path = public as $$
+-- El juez acepta una foto. Si con ella alguien llega a la meta, gana y se cierra el reto.
+create or replace function public.juez_aceptar_foto(p_token uuid, p_foto uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare v uuid := public._usuario_de(p_token); f public.fotos; r public.retos; a int;
 begin
-  if not exists (select 1 from public.retos where id = p_reto and creado_por = public._usuario_de(p_token)) then
-    raise exception 'solo_quien_creo_el_reto';
+  select * into f from public.fotos where id = p_foto;
+  if f.id is null then raise exception 'foto_no_existe'; end if;
+  select * into r from public.retos where id = f.reto_id for update;
+  if v <> coalesce(r.juez_id, r.creado_por) then raise exception 'solo_el_juez'; end if;
+  if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
+  update public.fotos set estado = 'aceptada', aceptada_en = now() where id = p_foto and estado <> 'aceptada';
+  select count(*) into a from public.fotos where reto_id = r.id and usuario_id = f.usuario_id and estado = 'aceptada';
+  if a >= r.meta then
+    perform public._cerrar_reto(r.id, 'meta', f.usuario_id);
+    return json_build_object('aceptadas', a, 'gano', true);
   end if;
-  perform public._cerrar_reto(p_reto, 'cancelado', null);
+  return json_build_object('aceptadas', a, 'gano', false);
+end $$;
+
+-- El juez elimina una foto que no aplica.
+create or replace function public.juez_eliminar_foto(p_token uuid, p_foto uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v uuid := public._usuario_de(p_token); f public.fotos; r public.retos;
+begin
+  select * into f from public.fotos where id = p_foto;
+  if f.id is null then raise exception 'foto_no_existe'; end if;
+  select * into r from public.retos where id = f.reto_id;
+  if v <> coalesce(r.juez_id, r.creado_por) then raise exception 'solo_el_juez'; end if;
+  if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
+  delete from public.fotos where id = p_foto;
 end $$;
 
 -- ------------------------------------------------------ administrador
@@ -317,13 +386,6 @@ begin
   delete from public.sesiones where usuario_id = p_usuario;
 end $$;
 
-create or replace function public.admin_cancelar_reto(p_clave text, p_reto uuid)
-returns void language plpgsql security definer set search_path = public as $$
-begin
-  perform public._admin_ok(p_clave);
-  perform public._cerrar_reto(p_reto, 'cancelado', null);
-end $$;
-
 create or replace function public.admin_eliminar_reto(p_clave text, p_reto uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -339,15 +401,15 @@ grant execute on function
   public.editar_perfil(uuid, text, text),
   public.cambiar_clave(uuid, text, text),
   public.revisar_retos(),
-  public.crear_reto(uuid, text, text, int, int),
+  public.crear_reto(uuid, text, text, int, int, uuid),
   public.registrar_foto(uuid, uuid, text),
-  public.borrar_foto(uuid, uuid),
-  public.cancelar_reto(uuid, uuid),
+  public.votar_foto(uuid, uuid, text),
+  public.juez_aceptar_foto(uuid, uuid),
+  public.juez_eliminar_foto(uuid, uuid),
   public.admin_entrar(text),
   public.admin_cambiar_clave(text, text),
   public.admin_eliminar_usuario(text, uuid),
   public.admin_restablecer_clave(text, uuid, text),
-  public.admin_cancelar_reto(text, uuid),
   public.admin_eliminar_reto(text, uuid)
 to anon, authenticated;
 
@@ -355,7 +417,7 @@ to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes'] loop
+  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

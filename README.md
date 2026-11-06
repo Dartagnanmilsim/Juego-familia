@@ -5,13 +5,15 @@ Un juego en línea para toda la familia. Alguien lanza un reto, por ejemplo
 en el móvil de todos. Cada uno sale a buscar y hace una foto cada vez que encuentra uno.
 El primero que llega a la meta cierra el reto y se lleva los puntos.
 
-- **Usuarios:** cada persona crea su usuario y clave. Sin iniciar sesión no se ven los retos.
-- **Retos:** el reto lo escribe quien lo crea (perros negros, gente con sombrero…). Solo hay un reto en marcha a la vez.
-- **Fotos solo en el momento** con la cámara del propio juego; no se puede adjuntar nada.
-- Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha.
-- Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos.
-- **Administrador:** botón «Entrar como administrador» en la pantalla de inicio. Clave inicial **1234**
-  (cámbiala en el panel). Puede eliminar usuarios y retos, cancelar retos y poner una clave nueva a un usuario que la olvidó.
+Tres módulos (pestañas abajo de la cabecera):
+
+- **👥 Usuarios:** cada persona crea su usuario y clave (y puede crear usuarios para otros). Lista de jugadores y perfil.
+- **🎯 Retos:** cualquiera crea un reto y elige un **juez**. El juez no compite: acepta ✅ o elimina 🗑️ las fotos.
+  **Solo cuentan las fotos aceptadas por el juez.** Los competidores marcan las fotos de otros con 👍 aceptar o 🚩 denunciar
+  para avisar al juez. Fotos solo en el momento, con la cámara del juego.
+- **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
+
+Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.
 
 El repositorio trae dos versiones del mismo juego.
 
