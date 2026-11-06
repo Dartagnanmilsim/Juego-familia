@@ -141,6 +141,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
 }
 .shoot input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
 .shoot label.busy { opacity: .6; pointer-events: none; }
+.shoot label.pick { margin-top: 10px; padding: 13px; background: transparent; color: #fff; border: 1.5px solid #4a4f55; font-family: var(--body); font-size: 16px; font-weight: 600; }
 .shoot p { margin: 8px 0 0; font-size: 13px; color: #aab1ac; text-align: center; }
 
 .race { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
@@ -238,7 +239,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     <img id="viewerImg" alt="">
     <p id="viewerCap"></p>
     <div class="row">
-      <button class="btn" id="viewerDel" hidden>Borrar mi foto</button>
+      <button class="btn" id="viewerDel" hidden>No aplica: borrar foto</button>
       <button class="btn go" id="viewerClose">Cerrar</button>
     </div>
   </div>
@@ -284,7 +285,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     fotosFor: null, unsubFotos: null,
     ready: { j: false, r: false }, busy: false, closing: {},
     editingProfile: false,
-    draft: { e: "🐕", q: "perros negros", meta: 10, min: 60 },
+    draft: { e: "🎯", q: "", meta: 10, min: 60 },
     profileDraft: null
   };
   var $ = function (id) { return document.getElementById(id); };
@@ -569,7 +570,8 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
   }
 
   async function borrarFoto(f) {
-    if (!(await ask("¿Borrar esta foto?", "Dejará de contar en el reto.", "Borrar"))) return;
+    var who = f.jugador === S.uid ? "tu foto" : "la foto de " + person(f.jugador).name;
+    if (!(await ask("¿Borrar " + who + "?", "No aplica al reto y dejará de contar.", "Borrar"))) return;
     try {
       await S.db.doc("fotos/" + f.id).delete();
       if (f.asset && S.assets) S.assets.delete(f.asset).catch(function () {});
@@ -627,7 +629,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     var p = person(f.jugador), r = activeReto();
     $("viewerImg").src = photoSrc(f);
     $("viewerCap").textContent = p.face + " " + p.name + " · " + fmtDate(f.creado);
-    var canDel = !S.readOnly && f.jugador === S.uid && r && r.id === f.reto;
+    var canDel = !S.readOnly && !!(r && r.id === f.reto);
     $("viewerDel").hidden = !canDel;
     $("viewerDel").onclick = function () { borrarFoto(f); };
     $("viewer").hidden = false;
@@ -704,7 +706,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     return '<section class="ticket">' +
       '<div class="ticket-head">' +
       '<div class="eyebrow"><span class="live-dot"></span>Reto en marcha</div>' +
-      "<h2>El primero que encuentre <em>" + r.meta + " " + esc(r.que) + "</em> " + esc(r.emoji) + "</h2>" +
+      "<h2>Gana el primero en conseguir <em>" + r.meta + " fotos</em> de: <em>" + esc(r.que) + "</em> " + esc(r.emoji) + "</h2>" +
       '<div class="by">Lo lanzó ' + esc(creator.face + " " + creator.name) + "</div></div>" +
       '<div class="ticket-stats">' +
       "<div><small>Tus fotos</small><strong>" + mine + "<span> / " + r.meta + "</span></strong></div>" +
@@ -712,7 +714,8 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
       (S.readOnly ? "" :
         '<div class="shoot"><label class="' + (S.busy ? "busy" : "") + '">' +
         '<input type="file" id="shot" accept="image/*" capture="environment" aria-label="Hacer foto">' +
-        (S.busy ? "Subiendo foto…" : "📸 ¡Encontré uno!") + "</label>" +
+        (S.busy ? "Subiendo foto…" : "📸 Tomar foto") + "</label>" +
+        (S.busy ? "" : '<label class="pick"><input type="file" id="pick" accept="image/*" aria-label="Elegir de la galería">Elegir de la galería</label>') +
         "<p>Haz la foto en cuanto lo veas. Cuenta al instante para todos.</p></div>") +
       "</section>" +
       '<section class="card"><h2>La carrera</h2><ul class="race">' +
@@ -748,12 +751,12 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
   function renderNew() {
     var d = S.draft;
     return '<section class="card stack">' +
-      '<div><div class="eyebrow">Nuevo reto</div><h2>¿Qué salimos a buscar?</h2></div>' +
+      '<div><div class="eyebrow">Nuevo reto</div><h2>¿Cuál es el reto?</h2><p class="note">Escribe lo que quieras fotografiar o toca una idea.</p></div>' +
       '<div class="chips" id="presets">' + PRESETS.map(function (p) {
         return '<button class="chip" type="button" data-e="' + p.e + '" data-q="' + esc(p.q) + '" aria-pressed="' + (p.q === d.q) + '">' + p.e + " " + esc(p.q) + "</button>";
       }).join("") + "</div>" +
       '<div class="row"><input type="text" id="rEmoji" maxlength="4" value="' + esc(d.e) + '" aria-label="Emoji" style="flex:0 0 64px;text-align:center">' +
-      '<input type="text" id="rQue" maxlength="60" value="' + esc(d.q) + '" aria-label="Qué hay que buscar"></div>' +
+      '<input type="text" id="rQue" maxlength="60" value="' + esc(d.q) + '" aria-label="Cuál es el reto" placeholder="Ej: gente con sombrero"></div>' +
       '<div class="field"><span class="lbl">¿Cuántos hay que encontrar?</span><div class="stepper">' +
       '<button class="btn" type="button" data-d="-1" aria-label="Menos">−</button><output id="rMeta">' + d.meta + "</output>" +
       '<button class="btn" type="button" data-d="1" aria-label="Más">+</button></div></div>' +
@@ -803,6 +806,7 @@ input[type="text"]:focus { outline: none; border-color: var(--signal); }
     document.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
     if (r) {
       if ($("shot")) $("shot").onchange = function () { var f = this.files[0]; this.value = ""; if (f) subirFoto(f); };
+      if ($("pick")) $("pick").onchange = $("shot").onchange;
       if ($("cancelReto")) $("cancelReto").onclick = function () { cancelar(r); };
       return;
     }
