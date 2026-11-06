@@ -25,8 +25,16 @@
     reto_cerrado: "El reto ya se cerró. ¡Alguien llegó antes o se acabó el tiempo!",
     solo_quien_creo_el_reto: "Solo quien creó el reto puede cancelarlo.",
     jugador_no_existe: "No encontramos tu jugador. Vuelve a unirte a la familia.",
-    duracion_invalida: "Elige una duración válida."
+    duracion_invalida: "Elige una duración válida.",
+    pin_incorrecto: "PIN incorrecto.",
+    pin_invalido: "El PIN debe tener de 4 a 8 números.",
+    pin_sin_definir: "Primero crea tu PIN de administrador.",
+    no_eres_admin: "Este jugador no es administrador.",
+    ultimo_admin: "Tiene que quedar al menos un administrador en la familia.",
+    reto_no_existe: "Ese reto ya no existe."
   };
+  // Modo administrador: el PIN solo se guarda en memoria mientras la página está abierta.
+  var admin = { open: false, pin: null, hasPin: null };
 
   var $app = document.getElementById("app");
   var cfg = window.RETOS_CONFIG || {};
@@ -330,6 +338,9 @@
     el("meBtn").hidden = false;
     el("meBtn").textContent = me.avatar;
 
+    if (admin.open && me.es_admin) { renderAdmin(); return; }
+    admin.open = false;
+
     var r = activeReto();
     var html = r ? renderActive(r) : renderLastResult() + renderNewForm();
     html += renderPlayers() + renderRanking() + renderHistory();
@@ -410,8 +421,10 @@
       '<h2>👨‍👩‍👧‍👦 Jugadores</h2>' +
       '<p class="hint">Juegas como <b>' + esc(player(session.jugadorId).avatar + " " + player(session.jugadorId).nombre) + '</b>. Si varios comparten este móvil, toca a otro para jugar como él.</p>' +
       '<div class="chips" id="players">' + data.jugadores.map(function (j) {
-        return '<button type="button" class="chip' + (j.id === session.jugadorId ? " on" : "") + '" data-id="' + j.id + '">' + esc(j.avatar) + " " + esc(j.nombre) + '</button>';
+        return '<button type="button" class="chip' + (j.id === session.jugadorId ? " on" : "") + '" data-id="' + j.id + '">' + esc(j.avatar) + " " + esc(j.nombre) + (j.es_admin ? " 👑" : "") + '</button>';
       }).join("") + '</div>' +
+      '<p class="hint">👑 = administrador: puede cancelar o eliminar retos.</p>' +
+      (player(session.jugadorId).es_admin ? '<button class="btn wide admin-btn" id="adminOpen">🛡️ Modo administrador</button>' : "") +
       (a ? '<form id="addForm" class="add-player">' +
         '<input id="addName" maxlength="30" placeholder="Nombre del jugador" required value="' + esc(a.nombre) + '">' +
         '<div class="avatars" id="addAvatars">' + AVATARS.map(function (x) {
@@ -510,8 +523,17 @@
     el("players").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b || b.dataset.id === session.jugadorId) return;
       session.jugadorId = b.dataset.id; save(SESSION_KEY, session);
+      admin = { open: false, pin: null, hasPin: null };
       toast("Ahora juegas como " + player(b.dataset.id).avatar + " " + player(b.dataset.id).nombre);
       renderFamily();
+    };
+    if (el("adminOpen")) el("adminOpen").onclick = function () {
+      guard(async function () {
+        admin.hasPin = must(await db.rpc("admin_tiene_pin", { p_admin: session.jugadorId }));
+        admin.open = true;
+        renderFamily();
+        window.scrollTo(0, 0);
+      });
     };
     if (el("addPlayer")) el("addPlayer").onclick = function () {
       addingPlayer = { nombre: "", avatar: AVATARS[0] }; renderFamily(); el("addName").focus();
@@ -535,6 +557,108 @@
         await reload();
       });
     };
+  }
+
+  // ------------------------------------------------------------ administrador
+  var ESTADOS = { activo: "🔥 En marcha", terminado: "🏁 Terminado", cancelado: "⛔ Cancelado" };
+
+  function renderAdmin() {
+    var me = player(session.jugadorId);
+    var html = '<section class="card admin">' +
+      '<div class="tag admin-tag">🛡️ Modo administrador</div>' +
+      '<h2>' + esc(me.avatar + " " + me.nombre) + ' 👑</h2>';
+
+    if (!admin.pin) {
+      html += admin.hasPin
+        ? '<p class="sub">Escribe tu PIN para administrar los retos.</p>' +
+          '<form id="pinForm" class="stack-form"><input id="pin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN" required>' +
+          '<button class="btn primary wide">Entrar</button></form>'
+        : '<p class="sub">Crea un PIN de 4 a 8 números. Te lo pedirá cada vez que entres a administrar, así nadie más puede hacerlo desde tu perfil.</p>' +
+          '<form id="pinForm" class="stack-form"><input id="pin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Nuevo PIN" required>' +
+          '<input id="pin2" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Repite el PIN" required>' +
+          '<button class="btn primary wide">Crear PIN y entrar</button></form>';
+      html += '<button class="btn ghost wide" id="adminExit">Volver al juego</button></section>';
+      $app.innerHTML = html;
+      el("adminExit").onclick = exitAdmin;
+      el("pinForm").onsubmit = function (e) {
+        e.preventDefault();
+        var pin = el("pin1").value.trim();
+        if (!admin.hasPin && pin !== el("pin2").value.trim()) return toast("Los dos PIN no coinciden");
+        guard(async function () {
+          if (admin.hasPin) must(await db.rpc("admin_entrar", { p_admin: session.jugadorId, p_pin: pin }));
+          else must(await db.rpc("admin_definir_pin", { p_admin: session.jugadorId, p_pin_actual: null, p_pin_nuevo: pin }));
+          admin.pin = pin; admin.hasPin = true;
+          toast("Modo administrador activado");
+          renderFamily();
+        });
+      };
+      el("pin1").focus();
+      return;
+    }
+
+    html += '<p class="sub">Cancelar un reto lo termina para todos sin repartir puntos. Eliminarlo lo borra por completo, con sus fotos y sus puntos.</p>';
+    html += '<h3>Retos</h3>' + (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {
+      return '<li><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
+        '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · lo creó " + esc(player(r.creado_por).nombre) + '</small></div>' +
+        '<div class="admin-actions">' +
+        (r.estado === "activo" ? '<button class="btn small" data-act="cancel" data-id="' + r.id + '">Cancelar</button>' : "") +
+        '<button class="btn small danger" data-act="delete" data-id="' + r.id + '">Eliminar</button></div></li>';
+    }).join("") + '</ul>' : '<p class="hint">Todavía no hay retos.</p>');
+
+    html += '<h3>Administradores</h3><ul class="admin-list">' + data.jugadores.map(function (j) {
+      return '<li><div class="admin-info"><b>' + esc(j.avatar + " " + j.nombre) + (j.es_admin ? " 👑" : "") + '</b></div>' +
+        '<div class="admin-actions">' + (j.id === session.jugadorId ? '<small>Tú</small>' :
+          '<button class="btn small' + (j.es_admin ? " ghost" : "") + '" data-act="role" data-id="' + j.id + '" data-v="' + (!j.es_admin) + '">' +
+          (j.es_admin ? "Quitar admin" : "Hacer admin") + '</button>') + '</div></li>';
+    }).join("") + '</ul>';
+
+    html += '<h3>Cambiar mi PIN</h3><form id="newPinForm" class="row">' +
+      '<input id="newPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Nuevo PIN" required>' +
+      '<button class="btn">Guardar</button></form>' +
+      '<button class="btn primary wide" id="adminExit">Salir del modo administrador</button></section>';
+    $app.innerHTML = html;
+
+    el("adminExit").onclick = exitAdmin;
+    $app.querySelectorAll("[data-act]").forEach(function (b) {
+      b.onclick = function () { adminAction(b.dataset.act, b.dataset.id, b.dataset.v === "true"); };
+    });
+    el("newPinForm").onsubmit = function (e) {
+      e.preventDefault();
+      var pin = el("newPin").value.trim();
+      guard(async function () {
+        must(await db.rpc("admin_definir_pin", { p_admin: session.jugadorId, p_pin_actual: admin.pin, p_pin_nuevo: pin }));
+        admin.pin = pin; toast("PIN cambiado"); renderFamily();
+      });
+    };
+  }
+
+  function adminAction(act, id, value) {
+    var base = { p_admin: session.jugadorId, p_pin: admin.pin };
+    if (act === "role") {
+      var j = player(id);
+      if (!confirm(value ? "¿Hacer administrador a " + j.nombre + "? Tendrá que crear su propio PIN." : "¿Quitar el papel de administrador a " + j.nombre + "?")) return;
+      return guard(async function () {
+        must(await db.rpc("admin_cambiar_rol", Object.assign(base, { p_jugador: id, p_es_admin: value })));
+        await reload();
+      });
+    }
+    var r = data.retos.filter(function (x) { return x.id === id; })[0];
+    if (!r) return;
+    var name = r.meta + " " + r.que_buscar;
+    var q = act === "cancel"
+      ? "¿Cancelar el reto «" + name + "» para todos? No se repartirán puntos."
+      : "¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos de la clasificación. No se puede deshacer.";
+    if (!confirm(q)) return;
+    guard(async function () {
+      must(await db.rpc(act === "cancel" ? "admin_cancelar_reto" : "admin_eliminar_reto", Object.assign(base, { p_reto: id })));
+      toast(act === "cancel" ? "Reto cancelado" : "Reto eliminado");
+      await reload();
+    });
+  }
+
+  function exitAdmin() {
+    admin = { open: false, pin: null, hasPin: null };
+    renderFamily();
   }
 
   function invite() {

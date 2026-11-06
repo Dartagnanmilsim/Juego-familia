@@ -293,3 +293,18 @@ button.camera { border: none; cursor: pointer; }
 .cam-shutter:active { transform: scale(0.92); }
 .cam-shutter:disabled { opacity: 0.4; }
 .btn.ghost-dark { background: transparent; border: 2px solid rgba(255,255,255,0.5); color: #fff; box-shadow: none; }
+
+/* Administrador */
+.admin-btn { margin-top: 12px; background: var(--dog); }
+.admin { border: 4px solid var(--dog); text-align: left; }
+.admin h2, .admin .sub { text-align: left; }
+.admin-tag { background: var(--dog); color: #fff; }
+.stack-form { display: grid; gap: 10px; }
+.admin-list { list-style: none; margin: 0; padding: 0; }
+.admin-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 2px solid #f4eee4; }
+.admin-info { min-width: 0; display: grid; gap: 2px; }
+.admin-info b { overflow: hidden; text-overflow: ellipsis; }
+.admin-info small, .admin-actions small { color: var(--muted); font-size: 13px; }
+.admin-actions { display: flex; gap: 6px; flex: none; }
+.btn.small { padding: 8px 12px; font-size: 14px; }
+.btn.small.ghost { margin-top: 0; }

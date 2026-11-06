@@ -6,7 +6,8 @@
 --
 --  Modelo:
 --    familias  -> grupo con un código para unirse (ej. "K7M2QD")
---    jugadores -> miembros de una familia (nombre + avatar)
+--    jugadores -> miembros de una familia (nombre + avatar; es_admin = administrador)
+--    admin_pins -> PIN cifrado de cada administrador (no se puede leer desde la app)
 --    retos     -> "el primero que encuentre 10 perros negros"
 --    fotos     -> cada foto que sube un jugador durante un reto
 --    puntajes  -> puntos que dejó cada reto al cerrarse (1º 3, 2º 2, 3º 1)
@@ -31,9 +32,19 @@ create table if not exists public.jugadores (
   familia_id uuid not null references public.familias(id) on delete cascade,
   nombre     text not null check (char_length(nombre) between 1 and 30),
   avatar     text not null default '🙂' check (char_length(avatar) <= 16),
+  es_admin   boolean not null default false,
   creado_en  timestamptz not null default now()
 );
+alter table public.jugadores add column if not exists es_admin boolean not null default false;
 create index if not exists jugadores_familia_idx on public.jugadores(familia_id);
+
+-- PIN de cada administrador (cifrado). Tabla sin acceso desde la app: solo la usan las funciones.
+create table if not exists public.admin_pins (
+  jugador_id uuid primary key references public.jugadores(id) on delete cascade,
+  pin_hash   text not null
+);
+alter table public.admin_pins enable row level security;
+revoke all on public.admin_pins from anon, authenticated;
 
 create table if not exists public.retos (
   id          uuid primary key default gen_random_uuid(),
@@ -183,8 +194,9 @@ create or replace function public.unirse_familia(p_familia uuid, p_nombre text, 
 returns public.jugadores language plpgsql security definer set search_path = public as $$
 declare j public.jugadores;
 begin
-  insert into public.jugadores (familia_id, nombre, avatar)
-  values (p_familia, trim(p_nombre), coalesce(nullif(p_avatar, ''), '🙂'))
+  insert into public.jugadores (familia_id, nombre, avatar, es_admin)
+  values (p_familia, trim(p_nombre), coalesce(nullif(p_avatar, ''), '🙂'),
+          not exists (select 1 from public.jugadores where familia_id = p_familia and es_admin))
   returning * into j;
   return j;
 end $$;
@@ -281,8 +293,99 @@ begin
   perform public._cerrar_reto(p_reto, 'cancelado', null);
 end $$;
 
+
+-- ------------------------------------------------- administrador
+-- Comprueba que p_admin es administrador de su familia y que el PIN es correcto.
+create or replace function public._admin_ok(p_admin uuid, p_pin text)
+returns uuid language plpgsql security definer set search_path = public, extensions as $$
+declare v_familia uuid; v_hash text;
+begin
+  select j.familia_id, a.pin_hash into v_familia, v_hash
+    from public.jugadores j left join public.admin_pins a on a.jugador_id = j.id
+   where j.id = p_admin and j.es_admin;
+  if v_familia is null then raise exception 'no_eres_admin'; end if;
+  if v_hash is null then raise exception 'pin_sin_definir'; end if;
+  if v_hash <> crypt(coalesce(p_pin, ''), v_hash) then raise exception 'pin_incorrecto'; end if;
+  return v_familia;
+end $$;
+revoke all on function public._admin_ok(uuid, text) from public, anon, authenticated;
+
+-- ¿Tiene PIN este administrador? (para saber si hay que crearlo)
+create or replace function public.admin_tiene_pin(p_admin uuid)
+returns boolean language sql security definer set search_path = public as $$
+  select exists (select 1 from public.admin_pins a join public.jugadores j on j.id = a.jugador_id
+                  where a.jugador_id = p_admin and j.es_admin);
+$$;
+
+-- Crear o cambiar el PIN (para cambiarlo hace falta el actual).
+create or replace function public.admin_definir_pin(p_admin uuid, p_pin_actual text, p_pin_nuevo text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not exists (select 1 from public.jugadores where id = p_admin and es_admin) then
+    raise exception 'no_eres_admin';
+  end if;
+  if p_pin_nuevo !~ '^[0-9]{4,8}$' then raise exception 'pin_invalido'; end if;
+  if exists (select 1 from public.admin_pins where jugador_id = p_admin) then
+    perform public._admin_ok(p_admin, p_pin_actual);
+  end if;
+  insert into public.admin_pins (jugador_id, pin_hash) values (p_admin, crypt(p_pin_nuevo, gen_salt('bf')))
+  on conflict (jugador_id) do update set pin_hash = excluded.pin_hash;
+end $$;
+
+-- Entrar al modo administrador (solo valida el PIN).
+create or replace function public.admin_entrar(p_admin uuid, p_pin text)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  perform public._admin_ok(p_admin, p_pin);
+  return true;
+end $$;
+
+-- Cancelar cualquier reto activo de la familia (no reparte puntos).
+create or replace function public.admin_cancelar_reto(p_admin uuid, p_pin text, p_reto uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_familia uuid;
+begin
+  v_familia := public._admin_ok(p_admin, p_pin);
+  if not exists (select 1 from public.retos where id = p_reto and familia_id = v_familia) then
+    raise exception 'reto_no_existe';
+  end if;
+  perform public._cerrar_reto(p_reto, 'cancelado', null);
+end $$;
+
+-- Eliminar un reto por completo (activo o pasado), con sus fotos y sus puntos.
+create or replace function public.admin_eliminar_reto(p_admin uuid, p_pin text, p_reto uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_familia uuid;
+begin
+  v_familia := public._admin_ok(p_admin, p_pin);
+  delete from public.retos where id = p_reto and familia_id = v_familia;
+  if not found then raise exception 'reto_no_existe'; end if;
+end $$;
+
+-- Dar o quitar el papel de administrador a otro jugador de la familia.
+create or replace function public.admin_cambiar_rol(p_admin uuid, p_pin text, p_jugador uuid, p_es_admin boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_familia uuid;
+begin
+  v_familia := public._admin_ok(p_admin, p_pin);
+  if not exists (select 1 from public.jugadores where id = p_jugador and familia_id = v_familia) then
+    raise exception 'jugador_no_es_de_la_familia';
+  end if;
+  if not p_es_admin and (select count(*) from public.jugadores where familia_id = v_familia and es_admin) <= 1 then
+    raise exception 'ultimo_admin';
+  end if;
+  update public.jugadores set es_admin = p_es_admin where id = p_jugador;
+  if not p_es_admin then delete from public.admin_pins where jugador_id = p_jugador; end if;
+end $$;
+
 grant execute on function
   public.revisar_retos(uuid),
+  public.admin_tiene_pin(uuid),
+  public.admin_definir_pin(uuid, text, text),
+  public.admin_entrar(uuid, text),
+  public.admin_cancelar_reto(uuid, text, uuid),
+  public.admin_eliminar_reto(uuid, text, uuid),
+  public.admin_cambiar_rol(uuid, text, uuid, boolean),
   public.crear_familia(text),
   public.buscar_familia(text),
   public.unirse_familia(uuid, text, text),

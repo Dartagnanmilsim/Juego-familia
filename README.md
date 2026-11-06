@@ -10,6 +10,8 @@ El primero que llega a la meta cierra el reto y se lleva los puntos.
   La primera vez el móvil pide permiso para usar la cámara: hay que aceptarlo.
 - Se pueden crear jugadores desde la app, y varias personas pueden compartir un mismo móvil cambiando de jugador.
 - Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha, y deja de contar.
+- **Administrador (👑):** quien crea la familia es administrador y puede nombrar a otros. Con su PIN puede
+  cancelar cualquier reto o eliminar retos (activos o pasados, con sus fotos y puntos).
 - Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. La clasificación suma todos los retos.
 - Si se acaba el tiempo, gana quien tenga más fotos.
 - La familia ve la carrera en directo, la galería de fotos y el historial de retos.
