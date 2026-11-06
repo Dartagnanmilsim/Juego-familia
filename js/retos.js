@@ -129,7 +129,7 @@
   }
   function setHeader() {
     var logged = !!me, inApp = view === "retos" || view === "usuarios" || view === "admin" || view === "admin-login";
-    el("barTitle").textContent = { retos: "🎯 Retos", usuarios: "👥 Usuarios", admin: "🛡️ Administrador", "admin-login": "🛡️ Administrador" }[view] || "Retos en familia";
+    el("barTitle").textContent = { retos: "Retos", usuarios: "Usuarios", admin: "Administrador", "admin-login": "Administrador" }[view] || "Retos en familia";
     el("barSub").hidden = !logged;
     el("barSub").textContent = logged ? "@" + me.usuario : "";
     el("meBtn").hidden = !logged;
@@ -182,7 +182,7 @@
   function renderLogin() {
     stopLive();
     $app.innerHTML =
-      '<section class="hero"><div class="big-emoji bob">📸</div><h1>Retos en familia</h1>' +
+      '<section class="hero"><div class="logo-mark" aria-hidden="true"></div><h1>Retos en familia</h1>' +
       '<p class="sub">Alguien lanza un reto, todos salen a hacer fotos y el primero que llega a la meta gana.</p></section>' +
       '<section class="card"><h2>Entrar</h2>' +
       '<form id="loginForm" class="stack-form">' +
@@ -190,8 +190,8 @@
       '<input id="lPass" type="password" autocomplete="current-password" placeholder="Clave" required>' +
       '<button class="btn primary wide">Entrar</button></form>' +
       '<p class="hint">¿Aún no tienes usuario?</p>' +
-      '<button class="btn wide" id="goRegister">➕ Crear mi usuario</button></section>' +
-      '<button class="btn ghost wide" id="goAdmin">🛡️ Entrar como administrador</button>';
+      '<button class="btn wide" id="goRegister">Crear mi usuario</button></section>' +
+      '<button class="btn ghost wide" id="goAdmin">Entrar como administrador</button>';
     el("loginForm").onsubmit = function (e) {
       e.preventDefault();
       guard(async function () {
@@ -254,7 +254,7 @@
       '<section class="card"><h2>Jugadores (' + data.usuarios.length + ')</h2>' +
       '<ul class="admin-list">' + data.usuarios.map(function (u) {
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><div class="admin-info"><b>' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (tú)" : "") + '</b>' +
-          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts" + (wins[u.id] ? " · 🏆×" + wins[u.id] : "") + '</small></div></li>';
+          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts" + (wins[u.id] ? " · " + wins[u.id] + (wins[u.id] === 1 ? " victoria" : " victorias") : "") + '</small></div></li>';
       }).join("") + '</ul>' +
       (nu
         ? '<form id="nuForm" class="stack-form new-user"><h3>Crear usuario para otra persona</h3>' +
@@ -264,8 +264,8 @@
           '<p class="label">Avatar</p>' + avatarPicker("nuAvatars", nu.avatar) +
           '<div class="row"><button type="button" class="btn ghost" id="nuCancel">Cancelar</button><button class="btn primary">Crear usuario</button></div>' +
           '<p class="hint">Dale a esa persona su usuario y su clave para que entre desde su móvil.</p></form>'
-        : '<button class="btn wide" id="nuOpen">➕ Crear usuario para otra persona</button>') +
-      '<button class="btn ghost wide" id="invite">📤 Compartir el enlace del juego</button></section>' +
+        : '<button class="btn wide" id="nuOpen">Crear usuario para otra persona</button>') +
+      '<button class="btn ghost wide" id="invite">Compartir enlace del juego</button></section>' +
       '<section class="card"><h2>Mi perfil</h2>' +
       '<p class="sub">Usuario: <b>@' + esc(me.usuario) + '</b></p>' +
       '<form id="profForm" class="stack-form">' +
@@ -425,9 +425,9 @@
   }
 
   function rolBadge(r) {
-    if (juezDe(r) === me.id) return '<span class="role judge">⚖️ Eres el juez</span>';
-    if (compite(r, me.id)) return '<span class="role in">✅ Participas</span>';
-    return '<span class="role out">👀 No participas</span>';
+    if (juezDe(r) === me.id) return '<span class="role judge">Juez</span>';
+    if (compite(r, me.id)) return '<span class="role in">Participas</span>';
+    return '<span class="role out">No participas</span>';
   }
 
   function renderList() {
@@ -437,8 +437,8 @@
       var pa = (juezDe(a) === me.id || compite(a, me.id)) ? 0 : 1, pb = (juezDe(b) === me.id || compite(b, me.id)) ? 0 : 1;
       return pa - pb || new Date(a.termina_en) - new Date(b.termina_en);
     });
-    return '<button class="btn primary wide new-reto" id="newReto">➕ Crear un reto nuevo</button>' +
-      '<section class="card"><h2>🔥 Retos en marcha (' + act.length + ')</h2>' +
+    return '<button class="btn primary wide new-reto" id="newReto">+ Crear reto</button>' +
+      '<section class="card"><h2>En marcha <span class="count">' + act.length + '</span></h2>' +
       (act.length ? '<ul class="reto-list">' + act.map(function (r) {
         var c = counts(r.id), mine = c[me.id] || { ok: 0, pend: 0 };
         var pend = data.fotos.filter(function (f) { return f.reto_id === r.id && f.estado !== "aceptada"; }).length;
@@ -446,7 +446,7 @@
         return '<li><button class="reto-card" data-open="' + r.id + '">' +
           '<span class="reto-emoji">' + esc(r.emoji) + '</span>' +
           '<span class="reto-body"><b>' + r.meta + " fotos · " + esc(r.que_buscar) + '</b>' +
-          '<small>⚖️ ' + esc(user(juezDe(r)).nombre) + ' · 👥 ' + esc(quien) + ' · ⏱️ <span data-left="' + r.id + '"></span></small>' +
+          '<small>Juez ' + esc(user(juezDe(r)).nombre) + ' · ' + esc(quien) + ' · <span data-left="' + r.id + '"></span></small>' +
           rolBadge(r) +
           (compite(r, me.id) ? '<small>Tus fotos aceptadas: <b>' + mine.ok + '/' + r.meta + '</b>' + (mine.pend ? " · " + mine.pend + " esperando" : "") + '</small>' : "") +
           (juezDe(r) === me.id && pend ? '<small class="to-review">' + pend + ' foto' + (pend === 1 ? "" : "s") + ' por revisar</small>' : "") +
@@ -467,34 +467,34 @@
     var pendientes = fotos.filter(function (f) { return f.estado !== "aceptada"; }).length;
     var accion;
     if (soyJuez) {
-      accion = '<div class="judge-box"><b>⚖️ Eres el juez de este reto</b>No compites. Revisa las fotos: ✅ acepta las que valen y 🗑️ elimina las que no. ' +
+      accion = '<div class="judge-box"><b>Eres el juez de este reto</b>No compites. Acepta las fotos que valen y elimina las que no. ' +
         'Solo cuentan las que aceptes.<div class="judge-count">' + pendientes + ' foto' + (pendientes === 1 ? "" : "s") + ' por revisar</div></div>';
     } else if (participo) {
       accion = '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas' + (mine.pend ? " · " + mine.pend + " esperando al juez" : "") + '</small></div>' +
-        '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
+        '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "Tomar foto") + '</button>' +
         '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego. El juez decide si cuentan.</p>';
     } else {
-      accion = '<div class="judge-box out-box"><b>👀 No participas en este reto</b>Puedes ver cómo va, pero no hacer fotos ni marcarlas.</div>';
+      accion = '<div class="judge-box out-box"><b>No participas en este reto</b>Puedes ver cómo va, pero no hacer fotos ni marcarlas.</div>';
     }
     return '<section class="card active">' +
-      '<div class="tag">🔥 Reto en marcha</div>' +
+      '<div class="tag live">En marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
-      '<p class="sub">⚖️ Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '<br>👥 ' +
+      '<p class="sub">Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '<br>' +
       (r.para_todos !== false ? "Para todos" : "Solo para: " + esc(lista.map(function (u) { return u.nombre; }).join(", "))) + '</p>' +
-      '<div class="clock-wrap">⏱️ <span data-left="' + r.id + '"></span></div>' +
+      '<div class="clock-wrap"><span data-left="' + r.id + '"></span></div>' +
       accion +
       '<ul class="race">' + lista.map(function (u) {
         var x = c[u.id] || { ok: 0, pend: 0 }, pct = Math.min(100, Math.round(x.ok / r.meta * 100));
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '>' +
           '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
           '<span class="track"><i style="width:' + pct + '%"></i></span>' +
-          '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + '⏳</small>' : "") + '</span></li>';
+          '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + ' pend.</small>' : "") + '</span></li>';
       }).join("") + '</ul>' +
       '</section>' +
-      '<section class="card"><h2>📷 Fotos del reto (' + fotos.length + ')</h2>' +
+      '<section class="card"><h2>Fotos <span class="count">' + fotos.length + '</span></h2>' +
       (fotos.length
-        ? (participo ? '<p class="hint">Si una foto de otro jugador vale, márcala 👍. Si no vale, 🚩 denúnciala. El juez lo verá.</p>' : "") +
+        ? (participo ? '<p class="hint">Si una foto de otro jugador vale, márcala como «Válida»; si no, «Denunciar». El juez lo verá.</p>' : "") +
           '<ul class="photo-list">' + fotos.map(function (f) { return photoItem(f, r, soyJuez, participo); }).join("") + '</ul>'
         : '<p class="hint">Todavía no hay fotos.</p>') +
       '</section>';
@@ -508,15 +508,15 @@
       '<div class="tag">' + (r.estado === "cancelado" ? "Reto cancelado" : "Reto terminado") + ' · ' + fmtDate(r.inicia_en) + '</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>' + r.meta + ' fotos de: ' + esc(r.que_buscar) + '</h2>' +
-      (w ? '<p class="winner">🏆 Ganó <b>' + esc(w.avatar + " " + w.nombre) + '</b><br><small>' +
+      (w ? '<p class="winner">Ganó <b>' + esc(w.avatar + " " + w.nombre) + '</b><br><small>' +
            (r.motivo === "meta" ? "Llegó primero a la meta con fotos aceptadas" : "Se acabó el tiempo y tenía más fotos aceptadas") + '</small></p>'
          : '<p class="sub">Nadie tenía fotos aceptadas.</p>') +
       (pos.length ? '<ol class="ranking">' + pos.map(function (p) {
         var u = user(p.usuario_id);
-        return '<li><span class="pos">' + (["🥇", "🥈", "🥉"][p.puesto - 1] || p.puesto) + '</span><span class="who">' + esc(u.avatar + " " + u.nombre) + '</span>' +
+        return '<li><span class="pos">' + p.puesto + '</span><span class="who">' + esc(u.avatar + " " + u.nombre) + '</span>' +
           '<span class="wins">' + p.fotos + ' fotos</span><span class="pts">+' + p.puntos + ' pts</span></li>';
       }).join("") + '</ol>' : "") +
-      '<p class="sub">⚖️ Juez: ' + esc(user(juezDe(r)).nombre) + '</p>' +
+      '<p class="sub">Juez: ' + esc(user(juezDe(r)).nombre) + '</p>' +
       (fotos.length ? '<div class="gallery">' + fotos.map(thumb).join("") + '</div>' : "") +
       '</section>';
   }
@@ -525,17 +525,17 @@
     var u = user(f.usuario_id), v = votosDe(f.id), mia = f.usuario_id === me.id, ok = f.estado === "aceptada";
     var acciones = "";
     if (soyJuez) {
-      acciones = (ok ? "" : '<button class="btn small" data-act="aceptar" data-id="' + f.id + '">✅ Aceptar</button>') +
-        '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">🗑️ Eliminar</button>';
+      acciones = (ok ? "" : '<button class="btn small" data-act="aceptar" data-id="' + f.id + '">Aceptar</button>') +
+        '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">Eliminar</button>';
     } else if (participo && !mia) {
-      acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">👍 Aceptar</button>' +
-        '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">🚩 Denunciar</button>';
+      acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">Válida</button>' +
+        '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">Denunciar</button>';
     }
     return '<li class="photo-item' + (v.denuncia ? " reported" : "") + '">' +
       '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"></button>' +
       '<div class="photo-info"><b>' + esc(u.avatar + " " + u.nombre) + (mia ? " (tú)" : "") + '</b>' +
-      '<span class="badge ' + (ok ? "ok" : "pend") + '">' + (ok ? "✅ Aceptada por el juez" : "⏳ Esperando al juez") + '</span>' +
-      '<small>👍 ' + v.acepta + ' · 🚩 ' + v.denuncia + ' · ' + fmtDate(f.creado_en) + '</small>' +
+      '<span class="badge ' + (ok ? "ok" : "pend") + '">' + (ok ? "Aceptada" : "Pendiente") + '</span>' +
+      '<small>' + v.acepta + ' a favor · ' + v.denuncia + ' denuncia' + (v.denuncia === 1 ? "" : "s") + ' · ' + fmtDate(f.creado_en) + '</small>' +
       (acciones ? '<div class="photo-actions">' + acciones + '</div>' : "") + '</div></li>';
   }
 
@@ -548,7 +548,7 @@
     if (!draft.juez || !data.usuarios.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
     return '<button class="btn ghost back-btn" id="backList">← Volver a los retos</button>' +
       '<section class="card">' +
-      '<h2>🎯 Crear un reto nuevo</h2>' +
+      '<h2>Nuevo reto</h2>' +
       '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
       '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
       '<input id="rQue" maxlength="60" value="' + esc(draft.que) + '" placeholder="Ej: gente con sombrero"></div>' +
@@ -562,11 +562,11 @@
       '<div class="chips" id="durs">' + DURATIONS.map(function (d) {
         return '<button type="button" class="chip' + (d.min === draft.min ? " on" : "") + '" data-m="' + d.min + '">' + d.label + '</button>';
       }).join("") + '</div>' +
-      '<p class="label">⚖️ ¿Quién es el juez? (acepta o elimina las fotos y no compite)</p>' +
+      '<p class="label">Juez <span class="muted">· acepta o elimina las fotos y no compite</span></p>' +
       '<div class="chips" id="judges">' + data.usuarios.map(function (u) {
         return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '">' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + '</button>';
       }).join("") + '</div>' +
-      '<p class="label">👥 ¿Para quién es el reto?</p>' +
+      '<p class="label">Participantes</p>' +
       '<div class="seg" id="forWho"><button type="button" data-todos="1" class="' + (draft.todos ? "on" : "") + '">Para todos</button>' +
       '<button type="button" data-todos="0" class="' + (draft.todos ? "" : "on") + '">Solo para algunos</button></div>' +
       '<div id="partsBox"' + (draft.todos ? " hidden" : "") + '><p class="hint">Toca a los que participan (el juez no compite):</p>' +
@@ -575,7 +575,7 @@
         return '<button type="button" class="chip' + (draft.parts.indexOf(u.id) >= 0 && !esJuez ? " on" : "") + (esJuez ? " disabled" : "") + '" data-p="' + u.id + '"' + (esJuez ? " disabled" : "") + '>' +
           esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + (esJuez ? " · juez" : "") + '</button>';
       }).join("") + '</div></div>' +
-      '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto!</button>' +
+      '<button class="btn primary wide" id="launch">Lanzar reto</button>' +
       '</section>';
   }
 
@@ -586,13 +586,13 @@
       if (p.puesto === 1) wins[p.usuario_id] = (wins[p.usuario_id] || 0) + 1;
     });
     var rows = data.usuarios.slice().sort(function (a, b) { return (pts[b.id] || 0) - (pts[a.id] || 0); });
-    var medals = ["🥇", "🥈", "🥉"];
+    var medals = [];
     return '<section class="card">' +
-      '<h2>🏅 Clasificación</h2>' +
+      '<h2>Clasificación</h2>' +
       '<ol class="ranking">' + rows.map(function (u, i) {
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><span class="pos">' + (medals[i] || i + 1) + '</span>' +
           '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
-          '<span class="wins">' + (wins[u.id] ? "🏆×" + wins[u.id] : "") + '</span>' +
+          '<span class="wins">' + (wins[u.id] ? wins[u.id] + (wins[u.id] === 1 ? " victoria" : " victorias") : "") + '</span>' +
           '<span class="pts">' + (pts[u.id] || 0) + ' pts</span></li>';
       }).join("") + '</ol>' +
       '<p class="hint">Cada reto: 1º 3 pts · 2º 2 pts · 3º 1 pt (solo cuentan fotos aceptadas por el juez).</p>' +
@@ -602,11 +602,11 @@
   function renderHistory() {
     var done = data.retos.filter(function (r) { return r.estado !== "activo"; });
     if (!done.length) return "";
-    return '<section class="card"><h2>📜 Retos anteriores</h2><ul class="history">' +
+    return '<section class="card"><h2>Historial</h2><ul class="history">' +
       done.map(function (r) {
         var w = r.ganador_id ? user(r.ganador_id) : null;
         return '<li><button class="hist-item" data-open="' + r.id + '"><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + " · juez " + esc(user(juezDe(r)).nombre) + '</small></span>' +
-          '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "🏆 " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + ' ›</span></button></li>';
+          '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "Ganó " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + ' ›</span></button></li>';
       }).join("") + '</ul></section>';
   }
 
@@ -828,7 +828,7 @@
     var w = last.ganador_id ? user(last.ganador_id) : null;
     var mine = data.puntajes.filter(function (p) { return p.reto_id === last.id && p.usuario_id === me.id; })[0];
     var iWon = w && last.ganador_id === me.id;
-    el("partyEmoji").textContent = iWon ? "🏆🎉" : w ? "🏁" + w.avatar : "⏰";
+    el("partyEmoji").textContent = iWon ? "🏆" : w ? w.avatar : "⏱";
     el("partyTitle").textContent = iWon ? "¡Ganaste el reto!" : w ? "¡" + w.nombre + " ganó el reto!" : "Se acabó el tiempo";
     el("partyText").textContent = last.emoji + " " + last.meta + " · " + last.que_buscar + (mine ? " · Tú: " + mine.fotos + " fotos, +" + mine.puntos + " pts" : "");
     el("toast").hidden = true;
@@ -838,10 +838,10 @@
   }
   el("partyClose").onclick = function () { el("party").hidden = true; };
   function confetti() {
-    var bits = ["🎉", "⭐", "🐾", "🎈", "✨", "🏆"];
+    var bits = ["#ff5a36", "#111827", "#22c55e", "#f5b700", "#3b82f6", "#ff5a36"];
     for (var i = 0; i < 26; i++) {
       var s = document.createElement("span");
-      s.className = "confetti"; s.textContent = bits[i % bits.length];
+      s.className = "confetti"; s.style.background = bits[i % bits.length];
       s.style.left = Math.random() * 100 + "vw"; s.style.animationDelay = Math.random() * 0.8 + "s";
       document.body.appendChild(s);
       setTimeout(function (n) { n.remove(); }.bind(null, s), 3500);
@@ -852,7 +852,7 @@
   function renderAdminLogin() {
     if (!me) stopLive();
     $app.innerHTML =
-      '<section class="card admin"><div class="tag admin-tag">🛡️ Administrador</div>' +
+      '<section class="card admin"><div class="tag admin-tag">Administrador</div>' +
       '<h2>Entrar al módulo de administrador</h2>' +
       '<p class="sub">Desde aquí se eliminan usuarios y retos y se restablecen claves.</p>' +
       '<form id="admForm" class="stack-form">' +
@@ -877,7 +877,7 @@
     var pts = {};
     data.puntajes.forEach(function (p) { pts[p.usuario_id] = (pts[p.usuario_id] || 0) + p.puntos; });
     $app.innerHTML =
-      '<section class="card admin"><div class="tag admin-tag">🛡️ Módulo de administrador</div>' +
+      '<section class="card admin"><div class="tag admin-tag">Panel de administrador</div>' +
       '<h2>Retos</h2>' +
       '<p class="hint">Eliminar un reto lo borra con sus fotos y sus puntos (también si está en marcha).</p>' +
       (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {

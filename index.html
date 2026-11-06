@@ -3,9 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#fef6e4">
+  <meta name="theme-color" content="#f5f6f8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
   <title>Retos en familia</title>
-  <link rel="stylesheet" href="css/retos.css?v=7">
+  <link rel="stylesheet" href="css/retos.css?v=8">
 </head>
 <body>
 
@@ -19,9 +22,9 @@
 </header>
 
 <nav id="tabs" class="tabs" hidden>
-  <button data-tab="retos">🎯<span>Retos</span></button>
-  <button data-tab="usuarios">👥<span>Usuarios</span></button>
-  <button data-tab="admin">🛡️<span>Administrador</span></button>
+  <button data-tab="retos"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/></svg><span>Retos</span></button>
+  <button data-tab="usuarios"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.3c2.3.2 4 1.8 4.5 4.7"/></svg><span>Usuarios</span></button>
+  <button data-tab="admin"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg><span>Admin</span></button>
 </nav>
 
 <div id="offline" class="offline" hidden>Sin conexión… reintentando</div>
@@ -37,14 +40,14 @@
     <div class="cam-bar">
       <span class="cam-side"></span>
       <button id="camShutter" class="cam-shutter" aria-label="Hacer foto" disabled></button>
-      <button id="camFlip" class="cam-round" aria-label="Cambiar de cámara">🔄</button>
+      <button id="camFlip" class="cam-round" aria-label="Cambiar de cámara"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9a8 8 0 0 1 14-3l2 2"/><path d="M20 4v4h-4"/><path d="M20 15a8 8 0 0 1-14 3l-2-2"/><path d="M4 20v-4h4"/></svg></button>
     </div>
   </div>
   <div id="camPreview" class="cam-stage" hidden>
     <img id="camImg" alt="Foto que acabas de hacer">
     <div class="cam-bar">
-      <button id="camRetake" class="btn ghost-dark">↺ Repetir</button>
-      <button id="camUse" class="btn primary">✅ Usar foto</button>
+      <button id="camRetake" class="btn ghost-dark">Repetir</button>
+      <button id="camUse" class="btn primary">Usar foto</button>
     </div>
   </div>
 </div>
@@ -54,7 +57,7 @@
   <img id="viewerImg" alt="">
   <div class="viewer-info"><span id="viewerCaption"></span></div>
   <div class="viewer-actions">
-    <button id="viewerDelete" class="btn danger" hidden>🗑️ No aplica: borrar foto</button>
+    <button id="viewerDelete" class="btn danger" hidden>Borrar foto</button>
     <button id="viewerClose" class="btn">Cerrar</button>
   </div>
 </div>
@@ -65,7 +68,7 @@
     <div class="party-emoji" id="partyEmoji">🏆</div>
     <h2 id="partyTitle"></h2>
     <p id="partyText"></p>
-    <button class="btn primary" id="partyClose">¡Genial!</button>
+    <button class="btn primary" id="partyClose">Continuar</button>
   </div>
 </div>
 
@@ -73,6 +76,6 @@
 
 <script src="js/vendor/supabase-2.45.4.js"></script>
 <script src="js/retos-config.js?v=3"></script>
-<script src="js/retos.js?v=7"></script>
+<script src="js/retos.js?v=8"></script>
 </body>
 </html>
