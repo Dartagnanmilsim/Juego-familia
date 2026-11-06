@@ -26,7 +26,7 @@ El repositorio trae dos versiones del mismo juego.
 | `supabase/README.md` | Pasos para configurar Supabase |
 
 Para ponerla en marcha:
-1. Sigue [`supabase/README.md`](supabase/README.md): crea el proyecto, ejecuta `retos.sql` y rellena `js/retos-config.js`.
+1. Sigue [`supabase/README.md`](supabase/README.md). Para instalar desde el móvil usa `supabase/instalar.sql` (sin comentarios: funciona aunque al pegar se pierdan los saltos de línea): crea el proyecto, ejecuta `retos.sql` y rellena `js/retos-config.js`.
 2. Publica la web, por ejemplo con **GitHub Pages**: en el repositorio ve a *Settings → Pages* y elige esta rama y la carpeta `/ (root)`.
 3. Abre la web. Una persona crea la familia y comparte el código o el enlace de invitación; los demás se unen con él.
 
