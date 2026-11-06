@@ -5,6 +5,10 @@ Un juego en línea para toda la familia. Alguien lanza un reto, por ejemplo
 en el móvil de todos. Cada uno sale a buscar y hace una foto cada vez que encuentra uno.
 El primero que llega a la meta cierra el reto y se lleva los puntos.
 
+- El reto lo escribe quien lo crea: cualquier cosa que se pueda fotografiar (perros negros, gente con sombrero, señales de STOP…).
+- Las fotos se hacen con la cámara o se eligen de la galería.
+- Se pueden crear jugadores desde la app, y varias personas pueden compartir un mismo móvil cambiando de jugador.
+- Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha, y deja de contar.
 - Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. La clasificación suma todos los retos.
 - Si se acaba el tiempo, gana quien tenga más fotos.
 - La familia ve la carrera en directo, la galería de fotos y el historial de retos.

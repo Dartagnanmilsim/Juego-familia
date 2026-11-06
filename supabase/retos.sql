@@ -255,14 +255,20 @@ begin
   return json_build_object('fotos', v_n, 'ganaste', false);
 end $$;
 
--- Borrar una foto propia (por si salió mal) mientras el reto sigue activo.
+-- Borrar una foto que no aplica (la propia o la de otro) mientras el reto sigue activo.
+-- Puede hacerlo cualquier jugador de la misma familia.
 create or replace function public.borrar_foto(p_foto uuid, p_jugador uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
+  if not exists (
+    select 1 from public.fotos f join public.jugadores j on j.familia_id = f.familia_id
+     where f.id = p_foto and j.id = p_jugador
+  ) then
+    raise exception 'jugador_no_es_de_la_familia';
+  end if;
   delete from public.fotos f
    using public.retos r
-   where f.id = p_foto and f.jugador_id = p_jugador
-     and r.id = f.reto_id and r.estado = 'activo';
+   where f.id = p_foto and r.id = f.reto_id and r.estado = 'activo';
 end $$;
 
 -- Quien creó el reto puede cancelarlo (no reparte puntos).

@@ -37,7 +37,8 @@
   var reloadTimer = null;
   var tick = null;
   var busy = false;
-  var draft = { emoji: "🐕", que: "perros negros", meta: 10, min: 60 };
+  var draft = { emoji: "🎯", que: "", meta: 10, min: 60 };
+  var addingPlayer = null;   // borrador del formulario "Agregar jugador"
 
   // ------------------------------------------------------------ utilidades
   function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
@@ -331,7 +332,7 @@
 
     var r = activeReto();
     var html = r ? renderActive(r) : renderLastResult() + renderNewForm();
-    html += renderRanking() + renderHistory();
+    html += renderPlayers() + renderRanking() + renderHistory();
     $app.innerHTML = html;
     bindFamily(r);
     updateClock();
@@ -345,13 +346,14 @@
     return '<section class="card active">' +
       '<div class="tag">🔥 Reto en marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
-      '<h2>El primero que encuentre <span class="goal">' + r.meta + " " + esc(r.que_buscar) + '</span></h2>' +
+      '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
       '<p class="sub">Lo lanzó ' + esc(player(r.creado_por).avatar + " " + player(r.creado_por).nombre) + '</p>' +
       '<div class="clock-wrap">⏱️ <span id="clock"></span></div>' +
       '<div class="mine"><b>' + mine + '</b> / ' + r.meta + '<small>tus fotos</small></div>' +
       '<label class="btn camera' + (busy ? " busy" : "") + '">' +
       '<input type="file" id="shot" accept="image/*" capture="environment">' +
-      (busy ? "Subiendo…" : "📸 ¡Encontré uno!") + '</label>' +
+      (busy ? "Subiendo…" : "📸 Tomar foto") + '</label>' +
+      (busy ? "" : '<label class="btn ghost wide gallery-btn"><input type="file" id="pick" accept="image/*">🖼️ Elegir de la galería</label>') +
       '<ul class="race">' + rows.map(function (j) {
         var n = c[j.id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
         return '<li' + (j.id === session.jugadorId ? ' class="is-me"' : "") + '>' +
@@ -386,20 +388,40 @@
 
   function renderNewForm() {
     return '<section class="card">' +
-      '<h2>🎯 Lanzar un reto nuevo</h2>' +
-      '<p class="label">¿Qué hay que buscar?</p>' +
+      '<h2>🎯 Crear un reto nuevo</h2>' +
+      '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
+      '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
+      '<input id="rQue" maxlength="60" value="' + esc(draft.que) + '" placeholder="Ej: gente con sombrero"></div>' +
+      '<p class="label">Ideas (toca una para usarla)</p>' +
       '<div class="chips" id="presets">' + PRESETS.map(function (p) {
         return '<button type="button" class="chip' + (p.que === draft.que ? " on" : "") + '" data-e="' + p.emoji + '" data-q="' + esc(p.que) + '">' + p.emoji + " " + esc(p.que) + '</button>';
       }).join("") + '</div>' +
-      '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
-      '<input id="rQue" maxlength="60" value="' + esc(draft.que) + '" placeholder="perros negros"></div>' +
-      '<p class="label">¿Cuántos?</p>' +
+      '<p class="label">¿Cuántas fotos hacen falta para ganar?</p>' +
       '<div class="stepper"><button type="button" class="btn" data-d="-1">−</button><b id="rMeta">' + draft.meta + '</b><button type="button" class="btn" data-d="1">+</button></div>' +
       '<p class="label">¿Cuánto dura el reto?</p>' +
       '<div class="chips" id="durs">' + DURATIONS.map(function (d) {
         return '<button type="button" class="chip' + (d.min === draft.min ? " on" : "") + '" data-m="' + d.min + '">' + d.label + '</button>';
       }).join("") + '</div>' +
       '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto a la familia!</button>' +
+      '</section>';
+  }
+
+  function renderPlayers() {
+    var a = addingPlayer;
+    return '<section class="card">' +
+      '<h2>👨‍👩‍👧‍👦 Jugadores</h2>' +
+      '<p class="hint">Juegas como <b>' + esc(player(session.jugadorId).avatar + " " + player(session.jugadorId).nombre) + '</b>. Si varios comparten este móvil, toca a otro para jugar como él.</p>' +
+      '<div class="chips" id="players">' + data.jugadores.map(function (j) {
+        return '<button type="button" class="chip' + (j.id === session.jugadorId ? " on" : "") + '" data-id="' + j.id + '">' + esc(j.avatar) + " " + esc(j.nombre) + '</button>';
+      }).join("") + '</div>' +
+      (a ? '<form id="addForm" class="add-player">' +
+        '<input id="addName" maxlength="30" placeholder="Nombre del jugador" required value="' + esc(a.nombre) + '">' +
+        '<div class="avatars" id="addAvatars">' + AVATARS.map(function (x) {
+          return '<button type="button" class="av' + (x === a.avatar ? " on" : "") + '" data-a="' + x + '">' + x + '</button>';
+        }).join("") + '</div>' +
+        '<div class="row"><button type="button" class="btn ghost" id="addCancel">Cancelar</button><button class="btn primary">Crear jugador</button></div>' +
+        '</form>'
+        : '<button class="btn ghost wide" id="addPlayer">➕ Agregar jugador</button>') +
       '</section>';
   }
 
@@ -441,9 +463,11 @@
     el("familyCode").onclick = el("invite").onclick = invite;
 
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
+    bindPlayers();
 
     if (r) {
       el("shot").onchange = function () { if (this.files[0]) upload(r, this.files[0]); this.value = ""; };
+      if (el("pick")) el("pick").onchange = el("shot").onchange;
       if (el("cancel")) el("cancel").onclick = function () {
         if (!confirm("¿Cancelar el reto para todos? No se repartirán puntos.")) return;
         guard(async function () { must(await db.rpc("cancelar_reto", { p_reto: r.id, p_jugador: session.jugadorId })); await reload(); });
@@ -457,7 +481,10 @@
       el("rEmoji").value = draft.emoji; el("rQue").value = draft.que;
       [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
     };
-    el("rQue").oninput = function () { draft.que = this.value; };
+    el("rQue").oninput = function () {
+      draft.que = this.value;
+      [].forEach.call(el("presets").children, function (c) { c.classList.toggle("on", c.dataset.q === draft.que); });
+    };
     el("rEmoji").oninput = function () { draft.emoji = this.value; };
     $app.querySelectorAll(".stepper .btn").forEach(function (b) {
       b.onclick = function () {
@@ -471,12 +498,43 @@
       [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
     };
     el("launch").onclick = function () {
-      if (!draft.que.trim()) return toast("Escribe qué hay que buscar");
+      if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
       guard(async function () {
         must(await db.rpc("crear_reto", {
           p_jugador: session.jugadorId, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min
         }));
         say("¡Reto lanzado! El primero que encuentre " + draft.meta + " " + draft.que + " gana");
+        await reload();
+      });
+    };
+  }
+
+  function bindPlayers() {
+    el("players").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b || b.dataset.id === session.jugadorId) return;
+      session.jugadorId = b.dataset.id; save(SESSION_KEY, session);
+      toast("Ahora juegas como " + player(b.dataset.id).avatar + " " + player(b.dataset.id).nombre);
+      renderFamily();
+    };
+    if (el("addPlayer")) el("addPlayer").onclick = function () {
+      addingPlayer = { nombre: "", avatar: AVATARS[0] }; renderFamily(); el("addName").focus();
+    };
+    if (!el("addForm")) return;
+    el("addName").oninput = function () { addingPlayer.nombre = this.value; };
+    el("addAvatars").onclick = function (e) {
+      var b = e.target.closest(".av"); if (!b) return;
+      addingPlayer.avatar = b.dataset.a;
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+    };
+    el("addCancel").onclick = function () { addingPlayer = null; renderFamily(); };
+    el("addForm").onsubmit = function (e) {
+      e.preventDefault();
+      guard(async function () {
+        var j = must(await db.rpc("unirse_familia", {
+          p_familia: data.familia.id, p_nombre: addingPlayer.nombre, p_avatar: addingPlayer.avatar
+        }));
+        addingPlayer = null;
+        toast("Jugador creado: " + j.avatar + " " + j.nombre);
         await reload();
       });
     };
@@ -540,10 +598,11 @@
     var p = player(f.jugador_id), r = activeReto();
     el("viewerImg").src = photoUrl(f.ruta);
     el("viewerCaption").textContent = p.avatar + " " + p.nombre + " · " + fmtDate(f.creado_en);
-    var canDelete = f.jugador_id === session.jugadorId && r && r.id === f.reto_id;
+    var canDelete = !!(r && r.id === f.reto_id);
     el("viewerDelete").hidden = !canDelete;
     el("viewerDelete").onclick = function () {
-      if (!confirm("¿Borrar esta foto? Dejará de contar.")) return;
+      var mine = f.jugador_id === session.jugadorId;
+      if (!confirm(mine ? "¿Borrar tu foto? Dejará de contar." : "¿Borrar la foto de " + p.nombre + " porque no aplica? Dejará de contar.")) return;
       guard(async function () {
         must(await db.rpc("borrar_foto", { p_foto: f.id, p_jugador: session.jugadorId }));
         closeViewer(); await reload();

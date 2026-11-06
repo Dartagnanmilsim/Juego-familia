@@ -268,3 +268,8 @@ input:focus { outline: none; border-color: var(--teal); }
   .bob, #clock.hurry, .confetti, .party-box { animation: none; }
 }
 .spacer { visibility: hidden; }
+.gallery-btn { position: relative; margin-top: 10px; }
+.gallery-btn input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.add-player { display: grid; gap: 12px; margin-top: 14px; }
+.add-player .row { justify-content: flex-end; }
+.add-player .btn.ghost { margin-top: 0; }
