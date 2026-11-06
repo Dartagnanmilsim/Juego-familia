@@ -5,16 +5,13 @@ Un juego en línea para toda la familia. Alguien lanza un reto, por ejemplo
 en el móvil de todos. Cada uno sale a buscar y hace una foto cada vez que encuentra uno.
 El primero que llega a la meta cierra el reto y se lleva los puntos.
 
-- El reto lo escribe quien lo crea: cualquier cosa que se pueda fotografiar (perros negros, gente con sombrero, señales de STOP…).
-- Las fotos solo se hacen en el momento con la cámara del propio juego (visor en vivo). No se puede adjuntar nada desde la galería ni desde archivos.
-  La primera vez el móvil pide permiso para usar la cámara: hay que aceptarlo.
-- Se pueden crear jugadores desde la app, y varias personas pueden compartir un mismo móvil cambiando de jugador.
-- Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha, y deja de contar.
-- **Administrador (👑):** quien crea la familia es administrador y puede nombrar a otros. Con su PIN puede
-  cancelar cualquier reto o eliminar retos (activos o pasados, con sus fotos y puntos).
-- Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. La clasificación suma todos los retos.
-- Si se acaba el tiempo, gana quien tenga más fotos.
-- La familia ve la carrera en directo, la galería de fotos y el historial de retos.
+- **Usuarios:** cada persona crea su usuario y clave. Sin iniciar sesión no se ven los retos.
+- **Retos:** el reto lo escribe quien lo crea (perros negros, gente con sombrero…). Solo hay un reto en marcha a la vez.
+- **Fotos solo en el momento** con la cámara del propio juego; no se puede adjuntar nada.
+- Cualquier jugador puede borrar una foto que no aplique mientras el reto sigue en marcha.
+- Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos.
+- **Administrador:** botón «Entrar como administrador» en la pantalla de inicio. Clave inicial **1234**
+  (cámbiala en el panel). Puede eliminar usuarios y retos, cancelar retos y poner una clave nueva a un usuario que la olvidó.
 
 El repositorio trae dos versiones del mismo juego.
 

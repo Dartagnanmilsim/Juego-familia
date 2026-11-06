@@ -1,318 +1,307 @@
-// Retos en familia: alguien lanza un reto ("el primero que encuentre 10 perros
-// negros"), todos los de la familia lo ven al instante, cada uno sube fotos
-// y el primero que llega a la meta cierra el reto y se lleva los puntos.
+// Retos en familia
+// Módulos: Usuarios (crear cuenta / entrar), Retos (jugar con fotos en el momento)
+// y Administrador (clave propia: elimina usuarios y retos, cancela retos, restablece claves).
 (function () {
   "use strict";
 
   var BUCKET = "retos-fotos";
-  var SESSION_KEY = "retos_sesion";
+  var TOKEN_KEY = "retos_token";
   var SEEN_KEY = "retos_vistos";
   var AVATARS = ["👩", "👨", "👧", "👦", "🧒", "👵", "👴", "🧑", "👶", "🦸", "🧙", "🐱", "🐶", "🦊", "🐼", "🦁"];
   var PRESETS = [
-    { emoji: "🐕", que: "perros negros" },
-    { emoji: "🚗", que: "coches rojos" },
-    { emoji: "🐈", que: "gatos" },
-    { emoji: "🌸", que: "flores amarillas" },
-    { emoji: "🚲", que: "bicicletas" },
-    { emoji: "🐦", que: "pájaros" }
+    { emoji: "🐕", que: "perros negros" }, { emoji: "🚗", que: "coches rojos" }, { emoji: "🐈", que: "gatos" },
+    { emoji: "🌸", que: "flores amarillas" }, { emoji: "🚲", que: "bicicletas" }, { emoji: "🎩", que: "gente con sombrero" }
   ];
   var DURATIONS = [
     { min: 15, label: "15 min" }, { min: 30, label: "30 min" }, { min: 60, label: "1 hora" },
     { min: 180, label: "3 horas" }, { min: 1440, label: "1 día" }, { min: 10080, label: "1 semana" }
   ];
+  var ESTADOS = { activo: "🔥 En marcha", terminado: "🏁 Terminado", cancelado: "⛔ Cancelado" };
   var ERRORS = {
+    credenciales_incorrectas: "Usuario o clave incorrectos.",
+    usuario_existe: "Ese usuario ya existe. Elige otro o entra con tu clave.",
+    usuario_invalido: "El usuario debe tener de 3 a 20 letras o números, sin espacios ni tildes.",
+    clave_corta: "La clave debe tener al menos 4 caracteres.",
+    sesion_invalida: "Tu sesión terminó. Vuelve a entrar.",
+    clave_admin_incorrecta: "Clave de administrador incorrecta.",
     ya_hay_reto_activo: "Ya hay un reto en marcha. Terminadlo primero.",
     reto_cerrado: "El reto ya se cerró. ¡Alguien llegó antes o se acabó el tiempo!",
     solo_quien_creo_el_reto: "Solo quien creó el reto puede cancelarlo.",
-    jugador_no_existe: "No encontramos tu jugador. Vuelve a unirte a la familia.",
     duracion_invalida: "Elige una duración válida.",
-    pin_incorrecto: "PIN incorrecto.",
-    pin_invalido: "El PIN debe tener de 4 a 8 números.",
-    pin_sin_definir: "Primero crea tu PIN de administrador.",
-    no_eres_admin: "Este jugador no es administrador.",
-    ultimo_admin: "Tiene que quedar al menos un administrador en la familia.",
+    usuario_no_existe: "Ese usuario ya no existe.",
     reto_no_existe: "Ese reto ya no existe."
   };
-  // Modo administrador: el PIN solo se guarda en memoria mientras la página está abierta.
-  var admin = { open: false, pin: null, hasPin: null };
 
   var $app = document.getElementById("app");
   var cfg = window.RETOS_CONFIG || {};
   var db = null;
-  var session = load(SESSION_KEY) || {};
-  var data = null;             // { familia, jugadores, retos, puntajes, fotos }
-  var channel = null;
-  var reloadTimer = null;
-  var tick = null;
+  var token = load(TOKEN_KEY);
+  var me = null;                 // usuario con sesión iniciada
+  var view = "login";            // login | registro | juego | perfil | admin-login | admin
+  var adminClave = null;         // solo en memoria
+  var data = null;               // { usuarios, retos, puntajes, fotos }
   var busy = false;
   var draft = { emoji: "🎯", que: "", meta: 10, min: 60 };
-  var addingPlayer = null;   // borrador del formulario "Agregar jugador"
+  var channel = null, pollTimer = null, tickTimer = null, reloadTimer = null;
 
   // ------------------------------------------------------------ utilidades
   function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function el(id) { return document.getElementById(id); }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-  function el(id) { return document.getElementById(id); }
   function toast(msg, ms) {
-    var t = el("toast");
-    t.textContent = msg; t.hidden = false;
-    clearTimeout(toast.t);
-    toast.t = setTimeout(function () { t.hidden = true; }, ms || 3200);
+    var t = el("toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, ms || 3200);
   }
   function errMsg(e) {
     var m = (e && (e.message || e.error_description || e.error)) || String(e);
     for (var k in ERRORS) if (m.indexOf(k) >= 0) return ERRORS[k];
     if (/fetch|network|Failed/i.test(m)) return "Sin conexión. Inténtalo de nuevo.";
+    if (/schema cache|Could not find the function/i.test(m)) return "La base de datos aún no está instalada en Supabase.";
     return "Algo salió mal: " + m;
   }
   function must(res) { if (res.error) throw res.error; return res.data; }
   function photoUrl(ruta) { return db.storage.from(BUCKET).getPublicUrl(ruta).data.publicUrl; }
-  function player(id) {
-    return (data && data.jugadores.filter(function (j) { return j.id === id; })[0]) ||
-      { nombre: "Alguien", avatar: "🙂" };
+  function user(id) {
+    return (data && data.usuarios.filter(function (u) { return u.id === id; })[0]) || { nombre: "Alguien", avatar: "🙂", usuario: "" };
   }
-  function activeReto() {
-    return data && data.retos.filter(function (r) { return r.estado === "activo"; })[0];
-  }
+  function activeReto() { return data && data.retos.filter(function (r) { return r.estado === "activo"; })[0]; }
   function fmtLeft(ms) {
     if (ms <= 0) return "¡Tiempo!";
-    var s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
-        m = Math.floor(s % 3600 / 60), ss = s % 60;
+    var s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
     function p(n) { return n < 10 ? "0" + n : n; }
     if (d) return d + "d " + h + "h " + p(m) + "m";
-    if (h) return h + ":" + p(m) + ":" + p(ss);
-    return p(m) + ":" + p(ss);
+    if (h) return h + ":" + p(m) + ":" + p(x);
+    return p(m) + ":" + p(x);
   }
   function fmtDate(iso) {
-    try {
-      return new Date(iso).toLocaleDateString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-    } catch (e) { return ""; }
+    try { return new Date(iso).toLocaleDateString("es", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+    catch (e) { return ""; }
   }
   function say(text) {
     if (!("speechSynthesis" in window)) return;
-    try {
-      speechSynthesis.cancel();
-      var u = new SpeechSynthesisUtterance(text);
-      u.lang = "es-ES"; u.rate = 1; u.pitch = 1.1;
-      speechSynthesis.speak(u);
-    } catch (e) {}
+    try { speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text); u.lang = "es-ES"; speechSynthesis.speak(u); } catch (e) {}
+  }
+  async function guard(fn) {
+    try { await fn(); }
+    catch (e) {
+      if (String(e && e.message).indexOf("sesion_invalida") >= 0) { logout(true); return; }
+      toast(errMsg(e), 4500);
+    }
+  }
+  function avatarPicker(id, current) {
+    return '<div class="avatars" id="' + id + '">' + AVATARS.map(function (a) {
+      return '<button type="button" class="av' + (a === current ? " on" : "") + '" data-a="' + a + '">' + a + '</button>';
+    }).join("") + '</div>';
+  }
+  function bindAvatarPicker(id, onPick) {
+    el(id).onclick = function (e) {
+      var b = e.target.closest(".av"); if (!b) return;
+      onPick(b.dataset.a);
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+    };
+  }
+  function setHeader() {
+    el("barTitle").textContent = view.indexOf("admin") === 0 ? "🛡️ Administrador" : "Retos en familia";
+    el("barSub").hidden = !(me && (view === "juego" || view === "perfil"));
+    el("barSub").textContent = me ? "@" + me.usuario : "";
+    el("meBtn").hidden = !(me && (view === "juego" || view === "perfil"));
+    if (me) el("meBtn").textContent = me.avatar;
   }
 
   // ------------------------------------------------------------ arranque
-  function start() {
-    if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) return renderSetupNeeded();
-    db = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    });
-
-    // Enlace de invitación: retos.html?familia=K7M2QD
-    var inv = new URLSearchParams(location.search).get("familia");
-    if (inv && (!session.codigo || session.codigo !== inv.toUpperCase())) {
-      session = { codigo: inv.toUpperCase() };
-      save(SESSION_KEY, session);
-      history.replaceState(null, "", location.pathname);
+  async function start() {
+    if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) {
+      $app.innerHTML = '<section class="card"><h2>Falta conectar la base de datos</h2><p>Revisa <code>js/retos-config.js</code>.</p></section>';
+      return;
     }
-
-    if (session.jugadorId && session.familiaId) return enterFamily();
-    if (session.codigo) return joinByCode(session.codigo, true);
-    renderWelcome();
+    db = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    el("meBtn").onclick = function () { view = "perfil"; render(); };
+    if (token) {
+      try {
+        me = must(await db.rpc("yo", { p_token: token }));
+        if (me && me.id) return enterGame();
+      } catch (e) {
+        if (String(e && e.message).indexOf("sesion_invalida") < 0) toast(errMsg(e), 5000);
+      }
+      token = null; me = null; save(TOKEN_KEY, null);
+    }
+    view = "login"; render();
   }
 
-  function renderSetupNeeded() {
-    $app.innerHTML =
-      '<section class="card">' +
-      '<div class="big-emoji">🛠️</div>' +
-      '<h2>Falta conectar la base de datos</h2>' +
-      '<p>Este juego guarda los retos y las fotos en línea con <b>Supabase</b> (gratis).</p>' +
-      '<ol class="steps">' +
-      '<li>Crea un proyecto en supabase.com</li>' +
-      '<li>En <b>SQL Editor</b> ejecuta el archivo <code>supabase/retos.sql</code></li>' +
-      '<li>Copia la <b>Project URL</b> y la <b>publishable key</b> en <code>js/retos-config.js</code></li>' +
-      '</ol></section>';
+  function render() {
+    setHeader();
+    if (view === "login") return renderLogin();
+    if (view === "registro") return renderRegister();
+    if (view === "admin-login") return renderAdminLogin();
+    if (!data) { $app.innerHTML = '<p class="loading">Cargando…</p>'; return; }
+    if (view === "admin") return renderAdmin();
+    if (view === "perfil") return renderProfile();
+    return renderGame();
   }
 
-  // ------------------------------------------------------------ bienvenida
-  function renderWelcome() {
+  // ============================================================ MÓDULO USUARIOS
+  function renderLogin() {
     stopLive();
-    el("familyName").textContent = "Retos en familia";
-    el("familyCode").hidden = true; el("meBtn").hidden = true;
     $app.innerHTML =
-      '<section class="hero"><div class="big-emoji bob">🐕‍🦺📸</div>' +
-      '<h1>Retos en familia</h1>' +
-      '<p class="sub">Alguien lanza un reto, todos salen a buscar y hacen fotos. ¡El primero que llega a la meta gana!</p></section>' +
-      '<section class="card">' +
-      '<h2>Unirme a mi familia</h2>' +
-      '<form id="joinForm" class="row">' +
-      '<input id="joinCode" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="Código (ej. K7M2QD)" required>' +
-      '<button class="btn primary">Entrar</button></form>' +
-      '</section>' +
-      '<section class="card">' +
-      '<h2>Crear una familia nueva</h2>' +
-      '<form id="newForm" class="row">' +
-      '<input id="newName" maxlength="40" placeholder="Nombre (ej. Los Martínez)" required>' +
-      '<button class="btn">Crear</button></form>' +
-      '</section>';
-
-    el("joinForm").onsubmit = function (e) { e.preventDefault(); joinByCode(el("joinCode").value); };
-    el("newForm").onsubmit = function (e) {
+      '<section class="hero"><div class="big-emoji bob">📸</div><h1>Retos en familia</h1>' +
+      '<p class="sub">Alguien lanza un reto, todos salen a hacer fotos y el primero que llega a la meta gana.</p></section>' +
+      '<section class="card"><h2>Entrar</h2>' +
+      '<form id="loginForm" class="stack-form">' +
+      '<input id="lUser" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Usuario" required>' +
+      '<input id="lPass" type="password" autocomplete="current-password" placeholder="Clave" required>' +
+      '<button class="btn primary wide">Entrar</button></form>' +
+      '<p class="hint">¿Aún no tienes usuario?</p>' +
+      '<button class="btn wide" id="goRegister">➕ Crear mi usuario</button></section>' +
+      '<button class="btn ghost wide" id="goAdmin">🛡️ Entrar como administrador</button>';
+    el("loginForm").onsubmit = function (e) {
       e.preventDefault();
       guard(async function () {
-        var f = must(await db.rpc("crear_familia", { p_nombre: el("newName").value }));
-        session = { codigo: f.codigo, familiaId: f.id };
-        save(SESSION_KEY, session);
-        renderProfile(f, null);
+        var res = must(await db.rpc("iniciar_sesion", { p_usuario: el("lUser").value, p_clave: el("lPass").value }));
+        loginDone(res);
+      });
+    };
+    el("goRegister").onclick = function () { view = "registro"; render(); };
+    el("goAdmin").onclick = function () { view = "admin-login"; render(); };
+  }
+
+  var reg = { avatar: AVATARS[0] };
+  function renderRegister() {
+    $app.innerHTML =
+      '<section class="card"><h2>Crear mi usuario</h2>' +
+      '<form id="regForm" class="stack-form">' +
+      '<label class="label" for="rUser">Usuario (para entrar)</label>' +
+      '<input id="rUser" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" placeholder="Ej: wilson" required>' +
+      '<label class="label" for="rName">Nombre que verá la familia</label>' +
+      '<input id="rName" maxlength="30" placeholder="Ej: Papá Wilson" required>' +
+      '<label class="label" for="rPass">Clave (mínimo 4 caracteres)</label>' +
+      '<input id="rPass" type="password" autocomplete="new-password" required>' +
+      '<input id="rPass2" type="password" autocomplete="new-password" placeholder="Repite la clave" required>' +
+      '<p class="label">Elige tu avatar</p>' + avatarPicker("rAvatars", reg.avatar) +
+      '<button class="btn primary wide">Crear usuario y entrar</button></form>' +
+      '<button class="btn ghost wide" id="goLogin">Ya tengo usuario</button></section>';
+    bindAvatarPicker("rAvatars", function (a) { reg.avatar = a; });
+    el("goLogin").onclick = function () { view = "login"; render(); };
+    el("regForm").onsubmit = function (e) {
+      e.preventDefault();
+      if (el("rPass").value !== el("rPass2").value) return toast("Las dos claves no coinciden");
+      guard(async function () {
+        var res = must(await db.rpc("registrar_usuario", {
+          p_usuario: el("rUser").value, p_clave: el("rPass").value, p_nombre: el("rName").value, p_avatar: reg.avatar
+        }));
+        toast("¡Usuario creado! Bienvenido/a, " + res.usuario.nombre);
+        loginDone(res);
       });
     };
   }
 
-  function joinByCode(code, silent) {
-    guard(async function () {
-      var f = must(await db.rpc("buscar_familia", { p_codigo: code }));
-      if (Array.isArray(f)) f = f[0];
-      if (!f || !f.id) {
-        session = {}; save(SESSION_KEY, session);
-        if (silent) renderWelcome();
-        toast("No existe ninguna familia con el código " + String(code).toUpperCase());
-        return;
-      }
-      session = { codigo: f.codigo, familiaId: f.id };
-      save(SESSION_KEY, session);
-      renderProfile(f, null);
-    });
+  function loginDone(res) {
+    token = res.token; me = res.usuario; save(TOKEN_KEY, token);
+    enterGame();
   }
 
-  // ------------------------------------------------------------ perfil
-  function renderProfile(familia, me) {
-    stopLive();
-    var avatar = (me && me.avatar) || AVATARS[0];
-    var others = [];
-    $app.innerHTML =
-      '<section class="card">' +
-      '<p class="sub">Familia <b>' + esc(familia.nombre) + '</b> · código <b>' + esc(familia.codigo) + '</b></p>' +
-      '<h2>' + (me ? "Mi perfil" : "¿Quién eres?") + '</h2>' +
-      '<div id="existing"></div>' +
-      '<form id="profForm">' +
-      '<input id="profName" maxlength="30" placeholder="Tu nombre" required value="' + esc(me ? me.nombre : "") + '">' +
-      '<p class="label">Elige tu avatar</p>' +
-      '<div class="avatars" id="avatars">' + AVATARS.map(function (a) {
-        return '<button type="button" class="av' + (a === avatar ? " on" : "") + '" data-a="' + a + '">' + a + '</button>';
-      }).join("") + '</div>' +
-      '<button class="btn primary wide">' + (me ? "Guardar" : "¡A jugar!") + '</button>' +
-      '</form>' +
-      (me ? '<button id="leave" class="btn ghost wide">Salir de esta familia en este móvil</button>' : '') +
-      '</section>';
+  function logout(expired) {
+    if (token && !expired) db.rpc("cerrar_sesion", { p_token: token });
+    token = null; me = null; save(TOKEN_KEY, null);
+    view = "login"; render();
+    if (expired) toast(ERRORS.sesion_invalida);
+  }
 
-    el("avatars").onclick = function (e) {
-      var b = e.target.closest(".av"); if (!b) return;
-      avatar = b.dataset.a;
-      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
-    };
+  function renderProfile() {
+    var p = { avatar: me.avatar };
+    $app.innerHTML =
+      '<section class="card"><h2>Mi perfil</h2>' +
+      '<p class="sub">Usuario: <b>@' + esc(me.usuario) + '</b></p>' +
+      '<form id="profForm" class="stack-form">' +
+      '<label class="label" for="pName">Nombre</label>' +
+      '<input id="pName" maxlength="30" required value="' + esc(me.nombre) + '">' +
+      '<p class="label">Avatar</p>' + avatarPicker("pAvatars", me.avatar) +
+      '<button class="btn primary wide">Guardar</button></form></section>' +
+      '<section class="card"><h2>Cambiar mi clave</h2>' +
+      '<form id="passForm" class="stack-form">' +
+      '<input id="pOld" type="password" autocomplete="current-password" placeholder="Clave actual" required>' +
+      '<input id="pNew" type="password" autocomplete="new-password" placeholder="Clave nueva" required>' +
+      '<button class="btn wide">Cambiar clave</button></form></section>' +
+      '<button class="btn wide" id="back">← Volver a los retos</button>' +
+      '<button class="btn ghost wide" id="logout">Cerrar sesión</button>';
+    bindAvatarPicker("pAvatars", function (a) { p.avatar = a; });
     el("profForm").onsubmit = function (e) {
       e.preventDefault();
       guard(async function () {
-        var name = el("profName").value;
-        var j = me
-          ? must(await db.rpc("editar_jugador", { p_jugador: me.id, p_nombre: name, p_avatar: avatar }))
-          : must(await db.rpc("unirse_familia", { p_familia: familia.id, p_nombre: name, p_avatar: avatar }));
-        session.jugadorId = j.id; session.familiaId = familia.id; session.codigo = familia.codigo;
-        save(SESSION_KEY, session);
-        enterFamily();
+        me = must(await db.rpc("editar_perfil", { p_token: token, p_nombre: el("pName").value, p_avatar: p.avatar }));
+        toast("Perfil guardado"); view = "juego"; await reload();
       });
     };
-    if (me) {
-      el("leave").onclick = function () {
-        if (!confirm("¿Salir de la familia en este móvil? Podrás volver a entrar con el código.")) return;
-        session = {}; save(SESSION_KEY, session); renderWelcome();
-      };
-    } else {
-      // Si ya jugaste antes en otro móvil, puedes elegirte en la lista
-      db.from("jugadores").select("*").eq("familia_id", familia.id).order("creado_en").then(function (res) {
-        others = res.data || [];
-        if (!others.length || !el("existing")) return;
-        el("existing").innerHTML = '<p class="label">¿Ya estás en la familia? Tócate:</p><div class="chips">' +
-          others.map(function (j) {
-            return '<button type="button" class="chip" data-id="' + j.id + '">' + esc(j.avatar) + " " + esc(j.nombre) + '</button>';
-          }).join("") + '</div><p class="label">o crea un jugador nuevo:</p>';
-        el("existing").onclick = function (e) {
-          var b = e.target.closest(".chip"); if (!b) return;
-          session.jugadorId = b.dataset.id; session.familiaId = familia.id; session.codigo = familia.codigo;
-          save(SESSION_KEY, session);
-          enterFamily();
-        };
+    el("passForm").onsubmit = function (e) {
+      e.preventDefault();
+      guard(async function () {
+        must(await db.rpc("cambiar_clave", { p_token: token, p_actual: el("pOld").value, p_nueva: el("pNew").value }));
+        toast("Clave cambiada"); el("passForm").reset();
       });
-    }
+    };
+    el("back").onclick = function () { view = "juego"; render(); };
+    el("logout").onclick = function () { logout(false); };
   }
 
-  // ------------------------------------------------------------ familia
-  async function enterFamily() {
-    $app.innerHTML = '<p class="loading">Cargando…</p>';
+  // ============================================================ DATOS EN VIVO
+  async function enterGame() {
+    view = "juego"; data = null; render();
     await reload();
-    if (!data) return;
     startLive();
   }
 
   async function reload() {
     try {
-      var fid = session.familiaId;
-      await db.rpc("revisar_retos", { p_familia: fid });   // cierra retos vencidos
+      await db.rpc("revisar_retos");
       var r = await Promise.all([
-        db.from("familias").select("*").eq("id", fid).maybeSingle(),
-        db.from("jugadores").select("*").eq("familia_id", fid).order("creado_en"),
-        db.from("retos").select("*").eq("familia_id", fid).order("inicia_en", { ascending: false }).limit(30),
-        db.from("puntajes").select("*").eq("familia_id", fid)
+        db.from("usuarios").select("*").order("creado_en"),
+        db.from("retos").select("*").order("inicia_en", { ascending: false }).limit(50),
+        db.from("puntajes").select("*")
       ]);
-      var familia = must(r[0]);
-      if (!familia) { session = {}; save(SESSION_KEY, session); toast("Esa familia ya no existe"); return renderWelcome(); }
-      var next = { familia: familia, jugadores: must(r[1]), retos: must(r[2]), puntajes: must(r[3]), fotos: [] };
-      var focus = next.retos[0];
-      if (focus) {
-        next.fotos = must(await db.from("fotos").select("*").eq("reto_id", focus.id).order("creado_en", { ascending: false }));
-      }
-      if (!next.jugadores.some(function (j) { return j.id === session.jugadorId; })) {
-        session.jugadorId = null; save(SESSION_KEY, session);
-        return renderProfile(familia, null);
+      var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), fotos: [] };
+      var focus = next.retos.filter(function (x) { return x.estado === "activo"; })[0] || next.retos[0];
+      if (focus) next.fotos = must(await db.from("fotos").select("*").eq("reto_id", focus.id).order("creado_en", { ascending: false }));
+      if (me) {
+        var fresh = next.usuarios.filter(function (u) { return u.id === me.id; })[0];
+        if (!fresh) { data = next; logout(true); return; }   // el administrador eliminó este usuario
+        me = fresh;
       }
       el("offline").hidden = true;
       var prev = data;
       data = next;
-      celebrateIfNew(prev);
-      renderFamily();
+      if (view === "juego" || view === "perfil" || view === "admin") {
+        if (view === "juego") celebrateIfNew(prev);
+        if (!(view === "perfil" && prev)) render();   // no borrar lo que se escribe en el perfil
+      }
     } catch (e) {
       el("offline").hidden = false;
       if (!data) $app.innerHTML = '<section class="card"><p>' + esc(errMsg(e)) + '</p><button class="btn" id="retry">Reintentar</button></section>';
-      if (el("retry")) el("retry").onclick = enterFamily;
+      if (el("retry")) el("retry").onclick = reload;
     }
   }
 
-  function scheduleReload() {
-    clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(reload, 350);
-  }
+  function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(reload, 350); }
 
-  // Tiempo real: cualquier cambio de la familia vuelve a cargar los datos
   function startLive() {
     stopLive();
-    var fid = session.familiaId;
-    var filter = "familia_id=eq." + fid;
-    channel = db.channel("familia-" + fid);
-    ["jugadores", "retos", "fotos", "puntajes"].forEach(function (t) {
-      channel.on("postgres_changes", { event: "*", schema: "public", table: t, filter: filter }, scheduleReload);
+    channel = db.channel("retos-en-familia");
+    ["usuarios", "retos", "fotos", "puntajes"].forEach(function (t) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     });
     channel.subscribe();
-    // Respaldo por si el móvil corta la conexión en segundo plano
-    startLive.poll = setInterval(reload, 30000);
-    tick = setInterval(updateClock, 1000);
+    pollTimer = setInterval(reload, 30000);   // respaldo si el móvil corta la conexión
+    tickTimer = setInterval(updateClock, 1000);
   }
   function stopLive() {
     if (channel) { try { db.removeChannel(channel); } catch (e) {} channel = null; }
-    clearInterval(startLive.poll); clearInterval(tick);
+    clearInterval(pollTimer); clearInterval(tickTimer);
   }
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden && data && session.jugadorId) reload();
+    if (!document.hidden && data && (view === "juego" || view === "admin")) reload();
   });
 
   function updateClock() {
@@ -326,68 +315,58 @@
 
   function counts(retoId) {
     var c = {};
-    data.fotos.forEach(function (f) { if (f.reto_id === retoId) c[f.jugador_id] = (c[f.jugador_id] || 0) + 1; });
+    data.fotos.forEach(function (f) { if (f.reto_id === retoId) c[f.usuario_id] = (c[f.usuario_id] || 0) + 1; });
     return c;
   }
 
-  function renderFamily() {
-    var me = player(session.jugadorId);
-    el("familyName").textContent = data.familia.nombre;
-    el("familyCode").hidden = false;
-    el("familyCode").textContent = "Código " + data.familia.codigo;
-    el("meBtn").hidden = false;
-    el("meBtn").textContent = me.avatar;
-
-    if (admin.open && me.es_admin) { renderAdmin(); return; }
-    admin.open = false;
-
+  // ============================================================ MÓDULO RETOS
+  function renderGame() {
     var r = activeReto();
     var html = r ? renderActive(r) : renderLastResult() + renderNewForm();
-    html += renderPlayers() + renderRanking() + renderHistory();
+    html += renderRanking() + renderHistory();
     $app.innerHTML = html;
-    bindFamily(r);
+    bindGame(r);
     updateClock();
   }
 
   function renderActive(r) {
-    var c = counts(r.id);
-    var mine = c[session.jugadorId] || 0;
-    var rows = data.jugadores.slice().sort(function (a, b) { return (c[b.id] || 0) - (c[a.id] || 0); });
+    var c = counts(r.id), mine = c[me.id] || 0;
+    var rows = data.usuarios.slice().sort(function (a, b) { return (c[b.id] || 0) - (c[a.id] || 0); });
     var thumbs = data.fotos.filter(function (f) { return f.reto_id === r.id; });
+    var creator = user(r.creado_por);
     return '<section class="card active">' +
       '<div class="tag">🔥 Reto en marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
-      '<p class="sub">Lo lanzó ' + esc(player(r.creado_por).avatar + " " + player(r.creado_por).nombre) + '</p>' +
+      '<p class="sub">Lo lanzó ' + esc(creator.avatar + " " + creator.nombre) + '</p>' +
       '<div class="clock-wrap">⏱️ <span id="clock"></span></div>' +
       '<div class="mine"><b>' + mine + '</b> / ' + r.meta + '<small>tus fotos</small></div>' +
       '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "📸 Tomar foto") + '</button>' +
       '<p class="hint">Solo valen fotos hechas en el momento con la cámara del juego.</p>' +
-      '<ul class="race">' + rows.map(function (j) {
-        var n = c[j.id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
-        return '<li' + (j.id === session.jugadorId ? ' class="is-me"' : "") + '>' +
-          '<span class="who">' + esc(j.avatar) + " " + esc(j.nombre) + '</span>' +
+      '<ul class="race">' + rows.map(function (u) {
+        var n = c[u.id] || 0, pct = Math.min(100, Math.round(n / r.meta * 100));
+        return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '>' +
+          '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
           '<span class="track"><i style="width:' + pct + '%"></i></span>' +
           '<span class="n">' + n + "/" + r.meta + '</span></li>';
       }).join("") + '</ul>' +
-      (thumbs.length ? '<h3>Fotos del reto</h3><div class="gallery">' + thumbs.map(thumb).join("") + '</div>' : "") +
-      (r.creado_por === session.jugadorId ? '<button class="btn ghost" id="cancel">Cancelar reto</button>' : "") +
+      (thumbs.length ? '<h3>Fotos del reto</h3><p class="hint">Toca una foto para verla. Si no aplica, se puede borrar.</p><div class="gallery">' + thumbs.map(thumb).join("") + '</div>' : "") +
+      (r.creado_por === me.id ? '<button class="btn ghost" id="cancel">Cancelar reto</button>' : "") +
       '</section>';
   }
 
   function thumb(f) {
-    var p = player(f.jugador_id);
-    return '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '">' +
-      '<span>' + esc(p.avatar) + '</span></button>';
+    var u = user(f.usuario_id);
+    return '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"><span>' + esc(u.avatar) + '</span></button>';
   }
 
   function renderLastResult() {
     var last = data.retos[0];
     if (!last || last.estado !== "terminado") return "";
-    var w = last.ganador_id ? player(last.ganador_id) : null;
+    var w = last.ganador_id ? user(last.ganador_id) : null;
     var thumbs = data.fotos.filter(function (f) { return f.reto_id === last.id; });
     return '<section class="card result">' +
-      '<div class="tag">Último reto · ' + esc(last.emoji) + " " + last.meta + " " + esc(last.que_buscar) + '</div>' +
+      '<div class="tag">Último reto · ' + esc(last.emoji) + " " + last.meta + " · " + esc(last.que_buscar) + '</div>' +
       (w ? '<div class="big-emoji">🏆' + esc(w.avatar) + '</div><h2>¡Ganó ' + esc(w.nombre) + '!</h2>' +
            '<p class="sub">' + (last.motivo === "meta" ? "Llegó primero a la meta" : "Se acabó el tiempo y tenía más fotos") + '</p>'
          : '<div class="big-emoji">⏰</div><h2>Se acabó el tiempo</h2><p class="sub">Nadie hizo fotos esta vez</p>') +
@@ -411,49 +390,28 @@
       '<div class="chips" id="durs">' + DURATIONS.map(function (d) {
         return '<button type="button" class="chip' + (d.min === draft.min ? " on" : "") + '" data-m="' + d.min + '">' + d.label + '</button>';
       }).join("") + '</div>' +
-      '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto a la familia!</button>' +
-      '</section>';
-  }
-
-  function renderPlayers() {
-    var a = addingPlayer;
-    return '<section class="card">' +
-      '<h2>👨‍👩‍👧‍👦 Jugadores</h2>' +
-      '<p class="hint">Juegas como <b>' + esc(player(session.jugadorId).avatar + " " + player(session.jugadorId).nombre) + '</b>. Si varios comparten este móvil, toca a otro para jugar como él.</p>' +
-      '<div class="chips" id="players">' + data.jugadores.map(function (j) {
-        return '<button type="button" class="chip' + (j.id === session.jugadorId ? " on" : "") + '" data-id="' + j.id + '">' + esc(j.avatar) + " " + esc(j.nombre) + (j.es_admin ? " 👑" : "") + '</button>';
-      }).join("") + '</div>' +
-      '<p class="hint">👑 = administrador: puede cancelar o eliminar retos.</p>' +
-      (player(session.jugadorId).es_admin ? '<button class="btn wide admin-btn" id="adminOpen">🛡️ Modo administrador</button>' : "") +
-      (a ? '<form id="addForm" class="add-player">' +
-        '<input id="addName" maxlength="30" placeholder="Nombre del jugador" required value="' + esc(a.nombre) + '">' +
-        '<div class="avatars" id="addAvatars">' + AVATARS.map(function (x) {
-          return '<button type="button" class="av' + (x === a.avatar ? " on" : "") + '" data-a="' + x + '">' + x + '</button>';
-        }).join("") + '</div>' +
-        '<div class="row"><button type="button" class="btn ghost" id="addCancel">Cancelar</button><button class="btn primary">Crear jugador</button></div>' +
-        '</form>'
-        : '<button class="btn ghost wide" id="addPlayer">➕ Agregar jugador</button>') +
+      '<button class="btn primary wide" id="launch">🚀 ¡Lanzar reto a todos!</button>' +
       '</section>';
   }
 
   function renderRanking() {
     var pts = {}, wins = {};
     data.puntajes.forEach(function (p) {
-      pts[p.jugador_id] = (pts[p.jugador_id] || 0) + p.puntos;
-      if (p.puesto === 1) wins[p.jugador_id] = (wins[p.jugador_id] || 0) + 1;
+      pts[p.usuario_id] = (pts[p.usuario_id] || 0) + p.puntos;
+      if (p.puesto === 1) wins[p.usuario_id] = (wins[p.usuario_id] || 0) + 1;
     });
-    var rows = data.jugadores.slice().sort(function (a, b) { return (pts[b.id] || 0) - (pts[a.id] || 0); });
+    var rows = data.usuarios.slice().sort(function (a, b) { return (pts[b.id] || 0) - (pts[a.id] || 0); });
     var medals = ["🥇", "🥈", "🥉"];
     return '<section class="card">' +
       '<h2>🏅 Clasificación</h2>' +
-      '<ol class="ranking">' + rows.map(function (j, i) {
-        return '<li' + (j.id === session.jugadorId ? ' class="is-me"' : "") + '><span class="pos">' + (medals[i] || i + 1) + '</span>' +
-          '<span class="who">' + esc(j.avatar) + " " + esc(j.nombre) + '</span>' +
-          '<span class="wins">' + (wins[j.id] ? "🏆×" + wins[j.id] : "") + '</span>' +
-          '<span class="pts">' + (pts[j.id] || 0) + ' pts</span></li>';
+      '<ol class="ranking">' + rows.map(function (u, i) {
+        return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><span class="pos">' + (medals[i] || i + 1) + '</span>' +
+          '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
+          '<span class="wins">' + (wins[u.id] ? "🏆×" + wins[u.id] : "") + '</span>' +
+          '<span class="pts">' + (pts[u.id] || 0) + ' pts</span></li>';
       }).join("") + '</ol>' +
-      '<p class="hint">Cada reto: 1º 3 pts · 2º 2 pts · 3º 1 pt</p>' +
-      '<button class="btn ghost wide" id="invite">➕ Invitar a la familia</button>' +
+      '<p class="hint">Cada reto: 1º 3 pts · 2º 2 pts · 3º 1 pt. Para sumar a alguien, que abra este enlace y cree su usuario.</p>' +
+      '<button class="btn ghost wide" id="invite">📤 Compartir el enlace del juego</button>' +
       '</section>';
   }
 
@@ -462,29 +420,23 @@
     if (!done.length) return "";
     return '<section class="card"><h2>📜 Retos anteriores</h2><ul class="history">' +
       done.map(function (r) {
-        var w = r.ganador_id ? player(r.ganador_id) : null;
-        return '<li><span>' + esc(r.emoji) + " " + r.meta + " " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + '</small></span>' +
+        var w = r.ganador_id ? user(r.ganador_id) : null;
+        return '<li><span>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '<small>' + fmtDate(r.inicia_en) + '</small></span>' +
           '<span>' + (r.estado === "cancelado" ? "Cancelado" : w ? "🏆 " + esc(w.avatar + " " + w.nombre) : "Sin ganador") + '</span></li>';
       }).join("") + '</ul></section>';
   }
 
-  // ------------------------------------------------------------ eventos
-  function bindFamily(r) {
-    el("meBtn").onclick = function () { renderProfile(data.familia, player(session.jugadorId)); };
-    el("familyCode").onclick = el("invite").onclick = invite;
-
+  function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
-    bindPlayers();
-
+    el("invite").onclick = invite;
     if (r) {
       el("shot").onclick = function () { openCamera(r); };
       if (el("cancel")) el("cancel").onclick = function () {
         if (!confirm("¿Cancelar el reto para todos? No se repartirán puntos.")) return;
-        guard(async function () { must(await db.rpc("cancelar_reto", { p_reto: r.id, p_jugador: session.jugadorId })); await reload(); });
+        guard(async function () { must(await db.rpc("cancelar_reto", { p_token: token, p_reto: r.id })); await reload(); });
       };
       return;
     }
-
     el("presets").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b) return;
       draft.emoji = b.dataset.e; draft.que = b.dataset.q;
@@ -497,10 +449,7 @@
     };
     el("rEmoji").oninput = function () { draft.emoji = this.value; };
     $app.querySelectorAll(".stepper .btn").forEach(function (b) {
-      b.onclick = function () {
-        draft.meta = Math.max(1, Math.min(100, draft.meta + Number(b.dataset.d)));
-        el("rMeta").textContent = draft.meta;
-      };
+      b.onclick = function () { draft.meta = Math.max(1, Math.min(100, draft.meta + Number(b.dataset.d))); el("rMeta").textContent = draft.meta; };
     });
     el("durs").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b) return;
@@ -510,200 +459,47 @@
     el("launch").onclick = function () {
       if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
       guard(async function () {
-        must(await db.rpc("crear_reto", {
-          p_jugador: session.jugadorId, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min
-        }));
-        say("¡Reto lanzado! El primero que encuentre " + draft.meta + " " + draft.que + " gana");
+        must(await db.rpc("crear_reto", { p_token: token, p_que: draft.que, p_emoji: draft.emoji, p_meta: draft.meta, p_minutos: draft.min }));
+        say("¡Reto lanzado! Gana el primero en conseguir " + draft.meta + " fotos de " + draft.que);
+        draft.que = "";
         await reload();
       });
     };
-  }
-
-  function bindPlayers() {
-    el("players").onclick = function (e) {
-      var b = e.target.closest(".chip"); if (!b || b.dataset.id === session.jugadorId) return;
-      session.jugadorId = b.dataset.id; save(SESSION_KEY, session);
-      admin = { open: false, pin: null, hasPin: null };
-      toast("Ahora juegas como " + player(b.dataset.id).avatar + " " + player(b.dataset.id).nombre);
-      renderFamily();
-    };
-    if (el("adminOpen")) el("adminOpen").onclick = function () {
-      guard(async function () {
-        admin.hasPin = must(await db.rpc("admin_tiene_pin", { p_admin: session.jugadorId }));
-        admin.open = true;
-        renderFamily();
-        window.scrollTo(0, 0);
-      });
-    };
-    if (el("addPlayer")) el("addPlayer").onclick = function () {
-      addingPlayer = { nombre: "", avatar: AVATARS[0] }; renderFamily(); el("addName").focus();
-    };
-    if (!el("addForm")) return;
-    el("addName").oninput = function () { addingPlayer.nombre = this.value; };
-    el("addAvatars").onclick = function (e) {
-      var b = e.target.closest(".av"); if (!b) return;
-      addingPlayer.avatar = b.dataset.a;
-      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
-    };
-    el("addCancel").onclick = function () { addingPlayer = null; renderFamily(); };
-    el("addForm").onsubmit = function (e) {
-      e.preventDefault();
-      guard(async function () {
-        var j = must(await db.rpc("unirse_familia", {
-          p_familia: data.familia.id, p_nombre: addingPlayer.nombre, p_avatar: addingPlayer.avatar
-        }));
-        addingPlayer = null;
-        toast("Jugador creado: " + j.avatar + " " + j.nombre);
-        await reload();
-      });
-    };
-  }
-
-  // ------------------------------------------------------------ administrador
-  var ESTADOS = { activo: "🔥 En marcha", terminado: "🏁 Terminado", cancelado: "⛔ Cancelado" };
-
-  function renderAdmin() {
-    var me = player(session.jugadorId);
-    var html = '<section class="card admin">' +
-      '<div class="tag admin-tag">🛡️ Modo administrador</div>' +
-      '<h2>' + esc(me.avatar + " " + me.nombre) + ' 👑</h2>';
-
-    if (!admin.pin) {
-      html += admin.hasPin
-        ? '<p class="sub">Escribe tu PIN para administrar los retos.</p>' +
-          '<form id="pinForm" class="stack-form"><input id="pin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN" required>' +
-          '<button class="btn primary wide">Entrar</button></form>'
-        : '<p class="sub">Crea un PIN de 4 a 8 números. Te lo pedirá cada vez que entres a administrar, así nadie más puede hacerlo desde tu perfil.</p>' +
-          '<form id="pinForm" class="stack-form"><input id="pin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Nuevo PIN" required>' +
-          '<input id="pin2" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Repite el PIN" required>' +
-          '<button class="btn primary wide">Crear PIN y entrar</button></form>';
-      html += '<button class="btn ghost wide" id="adminExit">Volver al juego</button></section>';
-      $app.innerHTML = html;
-      el("adminExit").onclick = exitAdmin;
-      el("pinForm").onsubmit = function (e) {
-        e.preventDefault();
-        var pin = el("pin1").value.trim();
-        if (!admin.hasPin && pin !== el("pin2").value.trim()) return toast("Los dos PIN no coinciden");
-        guard(async function () {
-          if (admin.hasPin) must(await db.rpc("admin_entrar", { p_admin: session.jugadorId, p_pin: pin }));
-          else must(await db.rpc("admin_definir_pin", { p_admin: session.jugadorId, p_pin_actual: null, p_pin_nuevo: pin }));
-          admin.pin = pin; admin.hasPin = true;
-          toast("Modo administrador activado");
-          renderFamily();
-        });
-      };
-      el("pin1").focus();
-      return;
-    }
-
-    html += '<p class="sub">Cancelar un reto lo termina para todos sin repartir puntos. Eliminarlo lo borra por completo, con sus fotos y sus puntos.</p>';
-    html += '<h3>Retos</h3>' + (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {
-      return '<li><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
-        '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · lo creó " + esc(player(r.creado_por).nombre) + '</small></div>' +
-        '<div class="admin-actions">' +
-        (r.estado === "activo" ? '<button class="btn small" data-act="cancel" data-id="' + r.id + '">Cancelar</button>' : "") +
-        '<button class="btn small danger" data-act="delete" data-id="' + r.id + '">Eliminar</button></div></li>';
-    }).join("") + '</ul>' : '<p class="hint">Todavía no hay retos.</p>');
-
-    html += '<h3>Administradores</h3><ul class="admin-list">' + data.jugadores.map(function (j) {
-      return '<li><div class="admin-info"><b>' + esc(j.avatar + " " + j.nombre) + (j.es_admin ? " 👑" : "") + '</b></div>' +
-        '<div class="admin-actions">' + (j.id === session.jugadorId ? '<small>Tú</small>' :
-          '<button class="btn small' + (j.es_admin ? " ghost" : "") + '" data-act="role" data-id="' + j.id + '" data-v="' + (!j.es_admin) + '">' +
-          (j.es_admin ? "Quitar admin" : "Hacer admin") + '</button>') + '</div></li>';
-    }).join("") + '</ul>';
-
-    html += '<h3>Cambiar mi PIN</h3><form id="newPinForm" class="row">' +
-      '<input id="newPin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Nuevo PIN" required>' +
-      '<button class="btn">Guardar</button></form>' +
-      '<button class="btn primary wide" id="adminExit">Salir del modo administrador</button></section>';
-    $app.innerHTML = html;
-
-    el("adminExit").onclick = exitAdmin;
-    $app.querySelectorAll("[data-act]").forEach(function (b) {
-      b.onclick = function () { adminAction(b.dataset.act, b.dataset.id, b.dataset.v === "true"); };
-    });
-    el("newPinForm").onsubmit = function (e) {
-      e.preventDefault();
-      var pin = el("newPin").value.trim();
-      guard(async function () {
-        must(await db.rpc("admin_definir_pin", { p_admin: session.jugadorId, p_pin_actual: admin.pin, p_pin_nuevo: pin }));
-        admin.pin = pin; toast("PIN cambiado"); renderFamily();
-      });
-    };
-  }
-
-  function adminAction(act, id, value) {
-    var base = { p_admin: session.jugadorId, p_pin: admin.pin };
-    if (act === "role") {
-      var j = player(id);
-      if (!confirm(value ? "¿Hacer administrador a " + j.nombre + "? Tendrá que crear su propio PIN." : "¿Quitar el papel de administrador a " + j.nombre + "?")) return;
-      return guard(async function () {
-        must(await db.rpc("admin_cambiar_rol", Object.assign(base, { p_jugador: id, p_es_admin: value })));
-        await reload();
-      });
-    }
-    var r = data.retos.filter(function (x) { return x.id === id; })[0];
-    if (!r) return;
-    var name = r.meta + " " + r.que_buscar;
-    var q = act === "cancel"
-      ? "¿Cancelar el reto «" + name + "» para todos? No se repartirán puntos."
-      : "¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos de la clasificación. No se puede deshacer.";
-    if (!confirm(q)) return;
-    guard(async function () {
-      must(await db.rpc(act === "cancel" ? "admin_cancelar_reto" : "admin_eliminar_reto", Object.assign(base, { p_reto: id })));
-      toast(act === "cancel" ? "Reto cancelado" : "Reto eliminado");
-      await reload();
-    });
-  }
-
-  function exitAdmin() {
-    admin = { open: false, pin: null, hasPin: null };
-    renderFamily();
   }
 
   function invite() {
-    var url = location.origin + location.pathname + "?familia=" + data.familia.codigo;
-    var text = "¡Únete a los retos de la familia " + data.familia.nombre + "! Código: " + data.familia.codigo;
-    if (navigator.share) {
-      navigator.share({ title: "Retos en familia", text: text, url: url }).catch(function () {});
-    } else if (navigator.clipboard) {
-      navigator.clipboard.writeText(text + "\n" + url).then(function () { toast("Invitación copiada 📋"); });
-    } else {
-      prompt("Comparte este enlace:", url);
-    }
+    var url = location.origin + location.pathname;
+    var text = "¡Únete a los Retos en familia! Crea tu usuario aquí:";
+    if (navigator.share) navigator.share({ title: "Retos en familia", text: text, url: url }).catch(function () {});
+    else if (navigator.clipboard) navigator.clipboard.writeText(text + " " + url).then(function () { toast("Enlace copiado 📋"); });
+    else prompt("Comparte este enlace:", url);
   }
 
   // ------------------------------------------------------------ cámara en vivo
   // Las fotos solo se hacen aquí, en el momento: no hay forma de adjuntar archivos.
   var cam = { stream: null, reto: null, facing: "environment", shot: null };
-
-  function camMsg(text) {
-    el("camMsg").textContent = text || "";
-    el("camMsg").hidden = !text;
-  }
+  function camMsg(text) { el("camMsg").textContent = text || ""; el("camMsg").hidden = !text; }
 
   async function startStream() {
     if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
     cam.stream = null;
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      camMsg("Este navegador no deja usar la cámara aquí. Abre el juego en Safari o Chrome desde su enlace https.");
+      camMsg("Este navegador no deja usar la cámara aquí. Abre el juego en Chrome o Safari desde su enlace https.");
       return;
     }
     try {
       cam.stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: cam.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        audio: false, video: { facingMode: { ideal: cam.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
       });
       var v = el("camVideo");
       v.srcObject = cam.stream;
       v.classList.toggle("mirror", cam.facing === "user");
       await v.play().catch(function () {});
-      camMsg("");
-      el("camShutter").disabled = false;
+      camMsg(""); el("camShutter").disabled = false;
     } catch (e) {
       el("camShutter").disabled = true;
       if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
-        camMsg("No hay permiso para la cámara. Toca el icono «aA» o el candado junto a la dirección, permite la Cámara y vuelve a intentarlo.");
+        camMsg("No hay permiso para la cámara. Toca el candado junto a la dirección, permite la Cámara y vuelve a intentarlo.");
       } else if (e && (e.name === "NotFoundError" || e.name === "OverconstrainedError")) {
         camMsg("No se encontró ninguna cámara en este dispositivo.");
       } else {
@@ -711,27 +507,21 @@
       }
     }
   }
-
   function openCamera(r) {
     if (busy) return;
     cam.reto = r; cam.shot = null;
-    el("camPreview").hidden = true; el("camLive").hidden = false;
-    el("camera").hidden = false;
+    el("camPreview").hidden = true; el("camLive").hidden = false; el("camera").hidden = false;
     el("camTitle").textContent = r.emoji + " " + r.que_buscar;
     startStream();
   }
-
   function closeCamera() {
     if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
-    cam.stream = null; cam.shot = null;
-    el("camVideo").srcObject = null;
-    el("camera").hidden = true;
+    cam.stream = null; cam.shot = null; el("camVideo").srcObject = null; el("camera").hidden = true;
   }
-
   function takePhoto() {
     var v = el("camVideo");
     if (!v.videoWidth) return;
-    var max = 1280, k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight));
+    var k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
     var cv = document.createElement("canvas");
     cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
     var g = cv.getContext("2d");
@@ -739,12 +529,10 @@
     g.drawImage(v, 0, 0, cv.width, cv.height);
     cv.toBlob(function (b) {
       if (!b) return;
-      cam.shot = b;
-      el("camImg").src = URL.createObjectURL(b);
+      cam.shot = b; el("camImg").src = URL.createObjectURL(b);
       el("camLive").hidden = true; el("camPreview").hidden = false;
     }, "image/jpeg", 0.82);
   }
-
   el("camShutter").onclick = takePhoto;
   el("camFlip").onclick = function () { cam.facing = cam.facing === "environment" ? "user" : "environment"; startStream(); };
   el("camClose").onclick = closeCamera;
@@ -755,45 +543,42 @@
   el("camUse").onclick = function () {
     var b = cam.shot, r = cam.reto;
     if (!b || !r) return;
-    closeCamera();
-    upload(r, b);
+    closeCamera(); upload(r, b);
   };
 
   async function upload(r, blob) {
     if (busy) return;
-    busy = true; renderFamily();
+    busy = true; render();
     try {
-      var type = blob.type && /^image\/(jpeg|png|webp)$/.test(blob.type) ? blob.type : "image/jpeg";
-      var ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
-      var ruta = r.familia_id + "/" + r.id + "/" + session.jugadorId + "/" + Date.now() + "." + ext;
-      must(await db.storage.from(BUCKET).upload(ruta, blob, { contentType: type, upsert: false }));
-      var res = must(await db.rpc("registrar_foto", { p_reto: r.id, p_jugador: session.jugadorId, p_ruta: ruta }));
+      var ruta = r.id + "/" + me.id + "/" + Date.now() + ".jpg";
+      must(await db.storage.from(BUCKET).upload(ruta, blob, { contentType: "image/jpeg", upsert: false }));
+      var res = must(await db.rpc("registrar_foto", { p_token: token, p_reto: r.id, p_ruta: ruta }));
       if (!res.ganaste) {
         var left = r.meta - res.fotos;
-        toast("¡Bien! " + res.fotos + " de " + r.meta + (left === 1 ? " · ¡te falta solo uno!" : ""));
-        say(left === 1 ? "¡Te falta solo uno!" : "¡Llevas " + res.fotos + "!");
+        toast("¡Bien! " + res.fotos + " de " + r.meta + (left === 1 ? " · ¡te falta solo una!" : ""));
+        say(left === 1 ? "¡Te falta solo una!" : "¡Llevas " + res.fotos + "!");
       }
     } catch (e) {
+      if (String(e && e.message).indexOf("sesion_invalida") >= 0) { busy = false; return logout(true); }
       toast(errMsg(e), 4500);
     }
     busy = false;
     await reload();
   }
 
-  // ------------------------------------------------------------ visor
+  // ------------------------------------------------------------ visor de fotos
   function openViewer(id) {
     var f = data.fotos.filter(function (x) { return x.id === id; })[0];
     if (!f) return;
-    var p = player(f.jugador_id), r = activeReto();
+    var u = user(f.usuario_id), r = activeReto();
     el("viewerImg").src = photoUrl(f.ruta);
-    el("viewerCaption").textContent = p.avatar + " " + p.nombre + " · " + fmtDate(f.creado_en);
-    var canDelete = !!(r && r.id === f.reto_id);
-    el("viewerDelete").hidden = !canDelete;
+    el("viewerCaption").textContent = u.avatar + " " + u.nombre + " · " + fmtDate(f.creado_en);
+    el("viewerDelete").hidden = !(me && r && r.id === f.reto_id);
     el("viewerDelete").onclick = function () {
-      var mine = f.jugador_id === session.jugadorId;
-      if (!confirm(mine ? "¿Borrar tu foto? Dejará de contar." : "¿Borrar la foto de " + p.nombre + " porque no aplica? Dejará de contar.")) return;
+      var mine = f.usuario_id === me.id;
+      if (!confirm(mine ? "¿Borrar tu foto? Dejará de contar." : "¿Borrar la foto de " + u.nombre + " porque no aplica? Dejará de contar.")) return;
       guard(async function () {
-        must(await db.rpc("borrar_foto", { p_foto: f.id, p_jugador: session.jugadorId }));
+        must(await db.rpc("borrar_foto", { p_token: token, p_foto: f.id }));
         closeViewer(); await reload();
       });
     };
@@ -806,43 +591,134 @@
   // ------------------------------------------------------------ celebración
   function celebrateIfNew(prev) {
     var last = data.retos[0];
-    if (!last || last.estado !== "terminado") return;
+    if (!me || !last || last.estado !== "terminado") return;
     var seen = load(SEEN_KEY) || [];
     if (seen.indexOf(last.id) >= 0) return;
     seen.push(last.id); save(SEEN_KEY, seen.slice(-50));
-    // Solo celebra retos que se cerraron hace poco (no al entrar por primera vez días después)
     if (!prev && Date.now() - new Date(last.cerrado_en) > 6 * 3600000) return;
-
-    var w = last.ganador_id ? player(last.ganador_id) : null;
-    var mine = data.puntajes.filter(function (p) { return p.reto_id === last.id && p.jugador_id === session.jugadorId; })[0];
-    var iWon = w && last.ganador_id === session.jugadorId;
+    var w = last.ganador_id ? user(last.ganador_id) : null;
+    var mine = data.puntajes.filter(function (p) { return p.reto_id === last.id && p.usuario_id === me.id; })[0];
+    var iWon = w && last.ganador_id === me.id;
     el("partyEmoji").textContent = iWon ? "🏆🎉" : w ? "🏁" + w.avatar : "⏰";
     el("partyTitle").textContent = iWon ? "¡Ganaste el reto!" : w ? "¡" + w.nombre + " ganó el reto!" : "Se acabó el tiempo";
-    el("partyText").textContent = (last.emoji + " " + last.meta + " " + last.que_buscar) +
-      (mine ? " · Tú: " + mine.fotos + " fotos, +" + mine.puntos + " pts" : "");
+    el("partyText").textContent = last.emoji + " " + last.meta + " · " + last.que_buscar + (mine ? " · Tú: " + mine.fotos + " fotos, +" + mine.puntos + " pts" : "");
     el("toast").hidden = true;
     el("party").hidden = false;
     say(iWon ? "¡Ganaste el reto!" : w ? w.nombre + " ganó el reto" : "Se acabó el tiempo");
-    if (iWon || w) confetti();
+    if (w) confetti();
   }
   el("partyClose").onclick = function () { el("party").hidden = true; };
-
   function confetti() {
     var bits = ["🎉", "⭐", "🐾", "🎈", "✨", "🏆"];
     for (var i = 0; i < 26; i++) {
       var s = document.createElement("span");
-      s.className = "confetti";
-      s.textContent = bits[i % bits.length];
-      s.style.left = Math.random() * 100 + "vw";
-      s.style.animationDelay = Math.random() * 0.8 + "s";
+      s.className = "confetti"; s.textContent = bits[i % bits.length];
+      s.style.left = Math.random() * 100 + "vw"; s.style.animationDelay = Math.random() * 0.8 + "s";
       document.body.appendChild(s);
       setTimeout(function (n) { n.remove(); }.bind(null, s), 3500);
     }
   }
 
-  // Ejecuta una acción mostrando errores amables
-  async function guard(fn) {
-    try { await fn(); } catch (e) { toast(errMsg(e), 4500); }
+  // ============================================================ MÓDULO ADMINISTRADOR
+  function renderAdminLogin() {
+    stopLive();
+    $app.innerHTML =
+      '<section class="card admin"><div class="tag admin-tag">🛡️ Administrador</div>' +
+      '<h2>Entrar al módulo de administrador</h2>' +
+      '<p class="sub">Desde aquí se eliminan usuarios y retos, se cancelan retos y se restablecen claves.</p>' +
+      '<form id="admForm" class="stack-form">' +
+      '<input id="admPass" type="password" autocomplete="off" placeholder="Clave de administrador" required>' +
+      '<button class="btn primary wide">Entrar</button></form>' +
+      '<button class="btn ghost wide" id="admBack">← Volver</button></section>';
+    el("admPass").focus();
+    el("admBack").onclick = exitAdmin;
+    el("admForm").onsubmit = function (e) {
+      e.preventDefault();
+      var clave = el("admPass").value;
+      guard(async function () {
+        must(await db.rpc("admin_entrar", { p_clave: clave }));
+        adminClave = clave; view = "admin"; data = null; render();
+        await reload(); startLive();
+        if (clave === "1234") toast("Recuerda cambiar la clave 1234 por una propia (abajo del todo).", 5000);
+      });
+    };
+  }
+
+  function renderAdmin() {
+    var pts = {};
+    data.puntajes.forEach(function (p) { pts[p.usuario_id] = (pts[p.usuario_id] || 0) + p.puntos; });
+    $app.innerHTML =
+      '<section class="card admin"><div class="tag admin-tag">🛡️ Módulo de administrador</div>' +
+      '<h2>Retos</h2>' +
+      '<p class="hint">Cancelar termina el reto para todos sin repartir puntos. Eliminar lo borra con sus fotos y puntos.</p>' +
+      (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {
+        return '<li><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
+          '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · " + esc(user(r.creado_por).nombre) + '</small></div>' +
+          '<div class="admin-actions">' +
+          (r.estado === "activo" ? '<button class="btn small" data-act="cancel" data-id="' + r.id + '">Cancelar</button>' : "") +
+          '<button class="btn small danger" data-act="del-reto" data-id="' + r.id + '">Eliminar</button></div></li>';
+      }).join("") + '</ul>' : '<p class="hint">No hay retos.</p>') +
+      '</section>' +
+      '<section class="card admin"><h2>Usuarios (' + data.usuarios.length + ')</h2>' +
+      '<p class="hint">Eliminar un usuario borra también sus fotos y sus puntos.</p>' +
+      (data.usuarios.length ? '<ul class="admin-list">' + data.usuarios.map(function (u) {
+        return '<li><div class="admin-info"><b>' + esc(u.avatar + " " + u.nombre) + '</b>' +
+          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts · desde " + fmtDate(u.creado_en) + '</small></div>' +
+          '<div class="admin-actions">' +
+          '<button class="btn small" data-act="reset" data-id="' + u.id + '">Clave</button>' +
+          '<button class="btn small danger" data-act="del-user" data-id="' + u.id + '">Eliminar</button></div></li>';
+      }).join("") + '</ul>' : '<p class="hint">Todavía no hay usuarios.</p>') +
+      '</section>' +
+      '<section class="card admin"><h2>Clave de administrador</h2>' +
+      '<form id="admNewForm" class="row"><input id="admNew" type="password" autocomplete="new-password" placeholder="Nueva clave" required>' +
+      '<button class="btn">Cambiar</button></form></section>' +
+      '<button class="btn primary wide" id="admExit">Salir del administrador</button>';
+
+    $app.querySelectorAll("[data-act]").forEach(function (b) { b.onclick = function () { adminAction(b.dataset.act, b.dataset.id); }; });
+    el("admExit").onclick = exitAdmin;
+    el("admNewForm").onsubmit = function (e) {
+      e.preventDefault();
+      var nueva = el("admNew").value;
+      guard(async function () {
+        must(await db.rpc("admin_cambiar_clave", { p_clave: adminClave, p_nueva: nueva }));
+        adminClave = nueva; toast("Clave de administrador cambiada"); el("admNewForm").reset();
+      });
+    };
+  }
+
+  function adminAction(act, id) {
+    var base = { p_clave: adminClave };
+    if (act === "del-user" || act === "reset") {
+      var u = user(id);
+      if (act === "reset") {
+        var nueva = prompt("Nueva clave para @" + u.usuario + " (mínimo 4 caracteres):");
+        if (!nueva) return;
+        return guard(async function () {
+          must(await db.rpc("admin_restablecer_clave", Object.assign(base, { p_usuario: id, p_nueva: nueva })));
+          toast("Clave de @" + u.usuario + " cambiada. Ya puede entrar con la nueva.");
+        });
+      }
+      if (!confirm("¿Eliminar el usuario @" + u.usuario + " (" + u.nombre + ")? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
+      return guard(async function () {
+        must(await db.rpc("admin_eliminar_usuario", Object.assign(base, { p_usuario: id })));
+        toast("Usuario eliminado"); await reload();
+      });
+    }
+    var r = data.retos.filter(function (x) { return x.id === id; })[0];
+    if (!r) return;
+    var name = r.meta + " · " + r.que_buscar;
+    if (!confirm(act === "cancel"
+      ? "¿Cancelar el reto «" + name + "» para todos? No se repartirán puntos."
+      : "¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
+    guard(async function () {
+      must(await db.rpc(act === "cancel" ? "admin_cancelar_reto" : "admin_eliminar_reto", Object.assign(base, { p_reto: id })));
+      toast(act === "cancel" ? "Reto cancelado" : "Reto eliminado"); await reload();
+    });
+  }
+
+  function exitAdmin() {
+    adminClave = null;
+    if (me) enterGame(); else { stopLive(); view = "login"; render(); }
   }
 
   start();

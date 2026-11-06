@@ -14,6 +14,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -308,3 +309,8 @@ button.camera { border: none; cursor: pointer; }
 .admin-actions { display: flex; gap: 6px; flex: none; }
 .btn.small { padding: 8px 12px; font-size: 14px; }
 .btn.small.ghost { margin-top: 0; }
+
+/* Formularios de usuario */
+.stack-form .label { margin: 6px 0 0; }
+.stack-form .btn.wide { margin-top: 8px; }
+#lUser, #rUser { text-transform: lowercase; }

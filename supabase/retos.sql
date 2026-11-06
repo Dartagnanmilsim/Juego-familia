@@ -1,121 +1,132 @@
 -- =====================================================================
 --  Retos en familia — base de datos (Supabase / PostgreSQL)
 --
---  Cómo usarlo: en tu proyecto de Supabase abre "SQL Editor", pega todo
+--  Cómo usarlo: en el proyecto de Supabase abre "SQL Editor", pega todo
 --  este archivo y pulsa "Run". Se puede ejecutar más de una vez.
 --
---  Modelo:
---    familias  -> grupo con un código para unirse (ej. "K7M2QD")
---    jugadores -> miembros de una familia (nombre + avatar; es_admin = administrador)
---    admin_pins -> PIN cifrado de cada administrador (no se puede leer desde la app)
---    retos     -> "el primero que encuentre 10 perros negros"
---    fotos     -> cada foto que sube un jugador durante un reto
---    puntajes  -> puntos que dejó cada reto al cerrarse (1º 3, 2º 2, 3º 1)
+--  Módulos:
+--    Usuarios      -> cada persona crea su cuenta (usuario + clave) e inicia sesión.
+--    Retos         -> "el primero que consiga 10 fotos de perros negros".
+--    Administrador -> entra con su clave (al principio 1234) y puede eliminar
+--                     usuarios y retos, cancelar retos y restablecer claves.
 --
---  Las tablas solo se leen desde la app; todas las escrituras pasan por
---  funciones (RPC) que validan las reglas y cierran el reto de forma
---  atómica, así dos personas no pueden "ganar" al mismo tiempo.
+--  Las claves se guardan cifradas (bcrypt) en tablas que la app no puede leer.
+--  La app solo lee las tablas públicas; todo lo que escribe pasa por funciones
+--  que comprueban la sesión y las reglas del juego.
 -- =====================================================================
 
 create extension if not exists pgcrypto;
+set search_path = public, extensions;
 
 -- ---------------------------------------------------------------- tablas
-create table if not exists public.familias (
+create table if not exists public.usuarios (
   id        uuid primary key default gen_random_uuid(),
-  nombre    text not null check (char_length(nombre) between 1 and 40),
-  codigo    text not null unique,
+  usuario   text not null unique check (usuario ~ '^[a-z0-9._-]{3,20}$'),
+  nombre    text not null check (char_length(nombre) between 1 and 30),
+  avatar    text not null default '🙂' check (char_length(avatar) <= 16),
   creado_en timestamptz not null default now()
 );
 
-create table if not exists public.jugadores (
-  id         uuid primary key default gen_random_uuid(),
-  familia_id uuid not null references public.familias(id) on delete cascade,
-  nombre     text not null check (char_length(nombre) between 1 and 30),
-  avatar     text not null default '🙂' check (char_length(avatar) <= 16),
-  es_admin   boolean not null default false,
-  creado_en  timestamptz not null default now()
+-- Claves y sesiones: sin acceso desde la app.
+create table if not exists public.credenciales (
+  usuario_id uuid primary key references public.usuarios(id) on delete cascade,
+  clave_hash text not null
 );
-alter table public.jugadores add column if not exists es_admin boolean not null default false;
-create index if not exists jugadores_familia_idx on public.jugadores(familia_id);
-
--- PIN de cada administrador (cifrado). Tabla sin acceso desde la app: solo la usan las funciones.
-create table if not exists public.admin_pins (
-  jugador_id uuid primary key references public.jugadores(id) on delete cascade,
-  pin_hash   text not null
+create table if not exists public.sesiones (
+  token      uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
+  creado_en  timestamptz not null default now(),
+  expira_en  timestamptz not null default now() + interval '180 days'
 );
-alter table public.admin_pins enable row level security;
-revoke all on public.admin_pins from anon, authenticated;
+create index if not exists sesiones_usuario_idx on public.sesiones(usuario_id);
+create table if not exists public.admin_config (
+  id         int primary key default 1 check (id = 1),
+  clave_hash text not null
+);
 
 create table if not exists public.retos (
   id          uuid primary key default gen_random_uuid(),
-  familia_id  uuid not null references public.familias(id) on delete cascade,
-  creado_por  uuid references public.jugadores(id) on delete set null,
+  creado_por  uuid references public.usuarios(id) on delete set null,
   que_buscar  text not null check (char_length(que_buscar) between 1 and 60),
-  emoji       text not null default '🔎' check (char_length(emoji) <= 16),
+  emoji       text not null default '🎯' check (char_length(emoji) <= 16),
   meta        int  not null check (meta between 1 and 100),
   inicia_en   timestamptz not null default now(),
   termina_en  timestamptz not null,
-  estado      text not null default 'activo'
-              check (estado in ('activo', 'terminado', 'cancelado')),
+  estado      text not null default 'activo' check (estado in ('activo', 'terminado', 'cancelado')),
   motivo      text check (motivo in ('meta', 'tiempo', 'cancelado')),
-  ganador_id  uuid references public.jugadores(id) on delete set null,
+  ganador_id  uuid references public.usuarios(id) on delete set null,
   cerrado_en  timestamptz,
   check (termina_en > inicia_en)
 );
-create index if not exists retos_familia_idx on public.retos(familia_id, inicia_en desc);
--- Solo un reto activo por familia a la vez
-create unique index if not exists retos_un_activo
-  on public.retos(familia_id) where estado = 'activo';
+create index if not exists retos_inicio_idx on public.retos(inicia_en desc);
+-- Solo un reto activo a la vez
+create unique index if not exists retos_un_activo on public.retos((true)) where estado = 'activo';
 
 create table if not exists public.fotos (
   id         uuid primary key default gen_random_uuid(),
   reto_id    uuid not null references public.retos(id) on delete cascade,
-  familia_id uuid not null references public.familias(id) on delete cascade,
-  jugador_id uuid not null references public.jugadores(id) on delete cascade,
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
   ruta       text not null,
   creado_en  timestamptz not null default now()
 );
-create index if not exists fotos_reto_idx on public.fotos(reto_id, jugador_id);
-create index if not exists fotos_familia_idx on public.fotos(familia_id);
+create index if not exists fotos_reto_idx on public.fotos(reto_id, usuario_id);
 
 create table if not exists public.puntajes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
-  familia_id uuid not null references public.familias(id) on delete cascade,
-  jugador_id uuid not null references public.jugadores(id) on delete cascade,
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
   puesto     int  not null,
   fotos      int  not null,
   puntos     int  not null,
-  primary key (reto_id, jugador_id)
+  primary key (reto_id, usuario_id)
 );
-create index if not exists puntajes_familia_idx on public.puntajes(familia_id);
 
--- -------------------------------------------- seguridad: solo lectura
-alter table public.familias  enable row level security;
-alter table public.jugadores enable row level security;
-alter table public.retos     enable row level security;
-alter table public.fotos     enable row level security;
-alter table public.puntajes  enable row level security;
+-- Clave inicial del administrador: 1234 (cámbiala desde el módulo de administrador)
+insert into public.admin_config (id, clave_hash) values (1, crypt('1234', gen_salt('bf')))
+on conflict (id) do nothing;
 
-drop policy if exists "leer familias"  on public.familias;
-drop policy if exists "leer jugadores" on public.jugadores;
-drop policy if exists "leer retos"     on public.retos;
-drop policy if exists "leer fotos"     on public.fotos;
-drop policy if exists "leer puntajes"  on public.puntajes;
-create policy "leer familias"  on public.familias  for select to anon, authenticated using (true);
-create policy "leer jugadores" on public.jugadores for select to anon, authenticated using (true);
-create policy "leer retos"     on public.retos     for select to anon, authenticated using (true);
-create policy "leer fotos"     on public.fotos     for select to anon, authenticated using (true);
-create policy "leer puntajes"  on public.puntajes  for select to anon, authenticated using (true);
+-- -------------------------------------------------------- seguridad
+alter table public.usuarios     enable row level security;
+alter table public.credenciales enable row level security;
+alter table public.sesiones     enable row level security;
+alter table public.admin_config enable row level security;
+alter table public.retos        enable row level security;
+alter table public.fotos        enable row level security;
+alter table public.puntajes     enable row level security;
 
-grant select on public.familias, public.jugadores, public.retos, public.fotos, public.puntajes
-  to anon, authenticated;
-revoke insert, update, delete on public.familias, public.jugadores, public.retos,
-  public.fotos, public.puntajes from anon, authenticated;
+drop policy if exists "leer usuarios" on public.usuarios;
+drop policy if exists "leer retos"    on public.retos;
+drop policy if exists "leer fotos"    on public.fotos;
+drop policy if exists "leer puntajes" on public.puntajes;
+create policy "leer usuarios" on public.usuarios for select to anon, authenticated using (true);
+create policy "leer retos"    on public.retos    for select to anon, authenticated using (true);
+create policy "leer fotos"    on public.fotos    for select to anon, authenticated using (true);
+create policy "leer puntajes" on public.puntajes for select to anon, authenticated using (true);
 
--- ------------------------------------------------------------ funciones
+grant select on public.usuarios, public.retos, public.fotos, public.puntajes to anon, authenticated;
+revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes from anon, authenticated;
+revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
 
--- Cierra un reto y reparte puntos. Uso interno (no se expone a la app).
--- Puestos por número de fotos; en empate gana quien llegó antes a su última foto.
+-- ------------------------------------------------------ funciones internas
+-- Devuelve el usuario de una sesión válida o falla con 'sesion_invalida'.
+create or replace function public._usuario_de(p_token uuid)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v uuid;
+begin
+  select usuario_id into v from public.sesiones where token = p_token and expira_en > now();
+  if v is null then raise exception 'sesion_invalida'; end if;
+  return v;
+end $$;
+
+-- Comprueba la clave del administrador.
+create or replace function public._admin_ok(p_clave text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare h text;
+begin
+  select clave_hash into h from public.admin_config where id = 1;
+  if h is null or h <> crypt(coalesce(p_clave, ''), h) then raise exception 'clave_admin_incorrecta'; end if;
+end $$;
+
+-- Cierra un reto y reparte puntos (1º 3, 2º 2, 3º 1).
 create or replace function public._cerrar_reto(p_reto uuid, p_motivo text, p_ganador uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -123,301 +134,241 @@ declare
   v_ganador uuid := p_ganador;
 begin
   select * into r from public.retos where id = p_reto for update;
-  if r.estado <> 'activo' then return; end if;
+  if r.id is null or r.estado <> 'activo' then return; end if;
 
   if p_motivo = 'cancelado' then
-    update public.retos set estado = 'cancelado', motivo = 'cancelado', cerrado_en = now()
-     where id = p_reto;
+    update public.retos set estado = 'cancelado', motivo = 'cancelado', cerrado_en = now() where id = p_reto;
     return;
   end if;
 
-  insert into public.puntajes (reto_id, familia_id, jugador_id, puesto, fotos, puntos)
-  select p_reto, r.familia_id, jugador_id, puesto, n,
-         case puesto when 1 then 3 when 2 then 2 when 3 then 1 else 0 end
+  insert into public.puntajes (reto_id, usuario_id, puesto, fotos, puntos)
+  select p_reto, usuario_id, puesto, n, case puesto when 1 then 3 when 2 then 2 when 3 then 1 else 0 end
     from (
-      select jugador_id, count(*)::int as n,
-             row_number() over (
-               order by (jugador_id = p_ganador) desc, count(*) desc, max(creado_en) asc
-             )::int as puesto
-        from public.fotos
-       where reto_id = p_reto
-       group by jugador_id
+      select usuario_id, count(*)::int as n,
+             row_number() over (order by (usuario_id = p_ganador) desc, count(*) desc, max(creado_en) asc)::int as puesto
+        from public.fotos where reto_id = p_reto group by usuario_id
     ) t;
 
   if v_ganador is null then
-    select jugador_id into v_ganador from public.puntajes where reto_id = p_reto and puesto = 1;
+    select usuario_id into v_ganador from public.puntajes where reto_id = p_reto and puesto = 1;
   end if;
-
-  update public.retos
-     set estado = 'terminado', motivo = p_motivo, ganador_id = v_ganador, cerrado_en = now()
+  update public.retos set estado = 'terminado', motivo = p_motivo, ganador_id = v_ganador, cerrado_en = now()
    where id = p_reto;
 end $$;
+
+revoke all on function public._usuario_de(uuid) from public, anon, authenticated;
+revoke all on function public._admin_ok(text) from public, anon, authenticated;
 revoke all on function public._cerrar_reto(uuid, text, uuid) from public, anon, authenticated;
 
--- Si el reto activo de la familia ya pasó su hora, ciérralo por tiempo.
-create or replace function public.revisar_retos(p_familia uuid)
+-- --------------------------------------------------------- usuarios
+create or replace function public.registrar_usuario(p_usuario text, p_clave text, p_nombre text, p_avatar text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare u public.usuarios; v_token uuid; v_usuario text := lower(trim(p_usuario));
+begin
+  if v_usuario !~ '^[a-z0-9._-]{3,20}$' then raise exception 'usuario_invalido'; end if;
+  if char_length(coalesce(p_clave, '')) < 4 then raise exception 'clave_corta'; end if;
+  if exists (select 1 from public.usuarios where usuario = v_usuario) then raise exception 'usuario_existe'; end if;
+  insert into public.usuarios (usuario, nombre, avatar)
+  values (v_usuario, trim(p_nombre), coalesce(nullif(p_avatar, ''), '🙂')) returning * into u;
+  insert into public.credenciales (usuario_id, clave_hash) values (u.id, crypt(p_clave, gen_salt('bf')));
+  insert into public.sesiones (usuario_id) values (u.id) returning token into v_token;
+  return json_build_object('token', v_token, 'usuario', row_to_json(u));
+end $$;
+
+create or replace function public.iniciar_sesion(p_usuario text, p_clave text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare u public.usuarios; h text; v_token uuid;
+begin
+  select * into u from public.usuarios where usuario = lower(trim(p_usuario));
+  select clave_hash into h from public.credenciales where usuario_id = u.id;
+  if u.id is null or h is null or h <> crypt(coalesce(p_clave, ''), h) then
+    raise exception 'credenciales_incorrectas';
+  end if;
+  delete from public.sesiones where usuario_id = u.id and expira_en <= now();
+  insert into public.sesiones (usuario_id) values (u.id) returning token into v_token;
+  return json_build_object('token', v_token, 'usuario', row_to_json(u));
+end $$;
+
+create or replace function public.cerrar_sesion(p_token uuid)
+returns void language sql security definer set search_path = public as $$
+  delete from public.sesiones where token = p_token;
+$$;
+
+-- Quién soy (comprueba que la sesión sigue valiendo).
+create or replace function public.yo(p_token uuid)
+returns public.usuarios language plpgsql security definer set search_path = public as $$
+declare u public.usuarios;
+begin
+  select * into u from public.usuarios where id = public._usuario_de(p_token);
+  return u;
+end $$;
+
+create or replace function public.editar_perfil(p_token uuid, p_nombre text, p_avatar text)
+returns public.usuarios language plpgsql security definer set search_path = public as $$
+declare u public.usuarios;
+begin
+  update public.usuarios set nombre = trim(p_nombre), avatar = coalesce(nullif(p_avatar, ''), avatar)
+   where id = public._usuario_de(p_token) returning * into u;
+  return u;
+end $$;
+
+create or replace function public.cambiar_clave(p_token uuid, p_actual text, p_nueva text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := public._usuario_de(p_token); h text;
+begin
+  select clave_hash into h from public.credenciales where usuario_id = v;
+  if h <> crypt(coalesce(p_actual, ''), h) then raise exception 'credenciales_incorrectas'; end if;
+  if char_length(coalesce(p_nueva, '')) < 4 then raise exception 'clave_corta'; end if;
+  update public.credenciales set clave_hash = crypt(p_nueva, gen_salt('bf')) where usuario_id = v;
+end $$;
+
+-- ------------------------------------------------------------ retos
+-- Cierra por tiempo el reto activo si ya pasó su hora.
+create or replace function public.revisar_retos()
 returns void language plpgsql security definer set search_path = public as $$
 declare v uuid;
 begin
-  for v in select id from public.retos
-            where familia_id = p_familia and estado = 'activo' and termina_en <= now()
-  loop
+  for v in select id from public.retos where estado = 'activo' and termina_en <= now() loop
     perform public._cerrar_reto(v, 'tiempo', null);
   end loop;
 end $$;
 
--- Crea una familia con un código de 6 letras/números fácil de dictar.
-create or replace function public.crear_familia(p_nombre text)
-returns public.familias language plpgsql security definer set search_path = public as $$
-declare
-  alfabeto constant text := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  v_codigo text;
-  f public.familias;
-begin
-  loop
-    v_codigo := '';
-    for i in 1..6 loop
-      v_codigo := v_codigo || substr(alfabeto, 1 + floor(random() * length(alfabeto))::int, 1);
-    end loop;
-    exit when not exists (select 1 from public.familias where codigo = v_codigo);
-  end loop;
-  insert into public.familias (nombre, codigo) values (trim(p_nombre), v_codigo) returning * into f;
-  return f;
-end $$;
-
-create or replace function public.buscar_familia(p_codigo text)
-returns public.familias language sql security definer set search_path = public as $$
-  select * from public.familias where codigo = upper(trim(p_codigo));
-$$;
-
-create or replace function public.unirse_familia(p_familia uuid, p_nombre text, p_avatar text)
-returns public.jugadores language plpgsql security definer set search_path = public as $$
-declare j public.jugadores;
-begin
-  insert into public.jugadores (familia_id, nombre, avatar, es_admin)
-  values (p_familia, trim(p_nombre), coalesce(nullif(p_avatar, ''), '🙂'),
-          not exists (select 1 from public.jugadores where familia_id = p_familia and es_admin))
-  returning * into j;
-  return j;
-end $$;
-
-create or replace function public.editar_jugador(p_jugador uuid, p_nombre text, p_avatar text)
-returns public.jugadores language plpgsql security definer set search_path = public as $$
-declare j public.jugadores;
-begin
-  update public.jugadores set nombre = trim(p_nombre), avatar = coalesce(nullif(p_avatar, ''), avatar)
-   where id = p_jugador returning * into j;
-  if j.id is null then raise exception 'jugador_no_existe'; end if;
-  return j;
-end $$;
-
--- Lanza un reto para toda la familia.
-create or replace function public.crear_reto(
-  p_jugador uuid, p_que text, p_emoji text, p_meta int, p_minutos int)
+create or replace function public.crear_reto(p_token uuid, p_que text, p_emoji text, p_meta int, p_minutos int)
 returns public.retos language plpgsql security definer set search_path = public as $$
-declare
-  v_familia uuid;
-  r public.retos;
+declare v uuid := public._usuario_de(p_token); r public.retos;
 begin
-  select familia_id into v_familia from public.jugadores where id = p_jugador;
-  if v_familia is null then raise exception 'jugador_no_existe'; end if;
-  if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then
-    raise exception 'duracion_invalida';
-  end if;
-
-  perform public.revisar_retos(v_familia);
-  if exists (select 1 from public.retos where familia_id = v_familia and estado = 'activo') then
-    raise exception 'ya_hay_reto_activo';
-  end if;
-
-  insert into public.retos (familia_id, creado_por, que_buscar, emoji, meta, termina_en)
-  values (v_familia, p_jugador, trim(p_que), coalesce(nullif(p_emoji, ''), '🔎'), p_meta,
-          now() + make_interval(mins => p_minutos))
+  if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then raise exception 'duracion_invalida'; end if;
+  perform public.revisar_retos();
+  if exists (select 1 from public.retos where estado = 'activo') then raise exception 'ya_hay_reto_activo'; end if;
+  insert into public.retos (creado_por, que_buscar, emoji, meta, termina_en)
+  values (v, trim(p_que), coalesce(nullif(p_emoji, ''), '🎯'), p_meta, now() + make_interval(mins => p_minutos))
   returning * into r;
   return r;
 end $$;
 
--- Registra una foto. Si con ella el jugador llega a la meta, gana y cierra el reto.
-create or replace function public.registrar_foto(p_reto uuid, p_jugador uuid, p_ruta text)
+-- Registra una foto. Si con ella el usuario llega a la meta, gana y cierra el reto.
+create or replace function public.registrar_foto(p_token uuid, p_reto uuid, p_ruta text)
 returns json language plpgsql security definer set search_path = public as $$
-declare
-  r public.retos;
-  v_familia uuid;
-  v_n int;
+declare v uuid := public._usuario_de(p_token); r public.retos; n int;
 begin
-  select * into r from public.retos where id = p_reto for update;  -- serializa a los jugadores
+  select * into r from public.retos where id = p_reto for update;  -- de uno en uno
   if r.id is null then raise exception 'reto_no_existe'; end if;
-  select familia_id into v_familia from public.jugadores where id = p_jugador;
-  if v_familia is distinct from r.familia_id then raise exception 'jugador_no_es_de_la_familia'; end if;
-
   if r.estado = 'activo' and r.termina_en <= now() then
     perform public._cerrar_reto(p_reto, 'tiempo', null);
     raise exception 'reto_cerrado';
   end if;
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
 
-  insert into public.fotos (reto_id, familia_id, jugador_id, ruta)
-  values (p_reto, r.familia_id, p_jugador, p_ruta);
-
-  select count(*) into v_n from public.fotos where reto_id = p_reto and jugador_id = p_jugador;
-  if v_n >= r.meta then
-    perform public._cerrar_reto(p_reto, 'meta', p_jugador);
-    return json_build_object('fotos', v_n, 'ganaste', true);
+  insert into public.fotos (reto_id, usuario_id, ruta) values (p_reto, v, p_ruta);
+  select count(*) into n from public.fotos where reto_id = p_reto and usuario_id = v;
+  if n >= r.meta then
+    perform public._cerrar_reto(p_reto, 'meta', v);
+    return json_build_object('fotos', n, 'ganaste', true);
   end if;
-  return json_build_object('fotos', v_n, 'ganaste', false);
+  return json_build_object('fotos', n, 'ganaste', false);
 end $$;
 
--- Borrar una foto que no aplica (la propia o la de otro) mientras el reto sigue activo.
--- Puede hacerlo cualquier jugador de la misma familia.
-create or replace function public.borrar_foto(p_foto uuid, p_jugador uuid)
+-- Cualquier jugador puede borrar una foto que no aplica mientras el reto sigue activo.
+create or replace function public.borrar_foto(p_token uuid, p_foto uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  if not exists (
-    select 1 from public.fotos f join public.jugadores j on j.familia_id = f.familia_id
-     where f.id = p_foto and j.id = p_jugador
-  ) then
-    raise exception 'jugador_no_es_de_la_familia';
-  end if;
-  delete from public.fotos f
-   using public.retos r
+  perform public._usuario_de(p_token);
+  delete from public.fotos f using public.retos r
    where f.id = p_foto and r.id = f.reto_id and r.estado = 'activo';
 end $$;
 
 -- Quien creó el reto puede cancelarlo (no reparte puntos).
-create or replace function public.cancelar_reto(p_reto uuid, p_jugador uuid)
+create or replace function public.cancelar_reto(p_token uuid, p_reto uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  if not exists (select 1 from public.retos where id = p_reto and creado_por = p_jugador) then
+  if not exists (select 1 from public.retos where id = p_reto and creado_por = public._usuario_de(p_token)) then
     raise exception 'solo_quien_creo_el_reto';
   end if;
   perform public._cerrar_reto(p_reto, 'cancelado', null);
 end $$;
 
+-- ------------------------------------------------------ administrador
+create or replace function public.admin_entrar(p_clave text)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin perform public._admin_ok(p_clave); return true; end $$;
 
--- ------------------------------------------------- administrador
--- Comprueba que p_admin es administrador de su familia y que el PIN es correcto.
-create or replace function public._admin_ok(p_admin uuid, p_pin text)
-returns uuid language plpgsql security definer set search_path = public, extensions as $$
-declare v_familia uuid; v_hash text;
-begin
-  select j.familia_id, a.pin_hash into v_familia, v_hash
-    from public.jugadores j left join public.admin_pins a on a.jugador_id = j.id
-   where j.id = p_admin and j.es_admin;
-  if v_familia is null then raise exception 'no_eres_admin'; end if;
-  if v_hash is null then raise exception 'pin_sin_definir'; end if;
-  if v_hash <> crypt(coalesce(p_pin, ''), v_hash) then raise exception 'pin_incorrecto'; end if;
-  return v_familia;
-end $$;
-revoke all on function public._admin_ok(uuid, text) from public, anon, authenticated;
-
--- ¿Tiene PIN este administrador? (para saber si hay que crearlo)
-create or replace function public.admin_tiene_pin(p_admin uuid)
-returns boolean language sql security definer set search_path = public as $$
-  select exists (select 1 from public.admin_pins a join public.jugadores j on j.id = a.jugador_id
-                  where a.jugador_id = p_admin and j.es_admin);
-$$;
-
--- Crear o cambiar el PIN (para cambiarlo hace falta el actual).
-create or replace function public.admin_definir_pin(p_admin uuid, p_pin_actual text, p_pin_nuevo text)
+create or replace function public.admin_cambiar_clave(p_clave text, p_nueva text)
 returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
-  if not exists (select 1 from public.jugadores where id = p_admin and es_admin) then
-    raise exception 'no_eres_admin';
-  end if;
-  if p_pin_nuevo !~ '^[0-9]{4,8}$' then raise exception 'pin_invalido'; end if;
-  if exists (select 1 from public.admin_pins where jugador_id = p_admin) then
-    perform public._admin_ok(p_admin, p_pin_actual);
-  end if;
-  insert into public.admin_pins (jugador_id, pin_hash) values (p_admin, crypt(p_pin_nuevo, gen_salt('bf')))
-  on conflict (jugador_id) do update set pin_hash = excluded.pin_hash;
+  perform public._admin_ok(p_clave);
+  if char_length(coalesce(p_nueva, '')) < 4 then raise exception 'clave_corta'; end if;
+  update public.admin_config set clave_hash = crypt(p_nueva, gen_salt('bf')) where id = 1;
 end $$;
 
--- Entrar al modo administrador (solo valida el PIN).
-create or replace function public.admin_entrar(p_admin uuid, p_pin text)
-returns boolean language plpgsql security definer set search_path = public as $$
-begin
-  perform public._admin_ok(p_admin, p_pin);
-  return true;
-end $$;
-
--- Cancelar cualquier reto activo de la familia (no reparte puntos).
-create or replace function public.admin_cancelar_reto(p_admin uuid, p_pin text, p_reto uuid)
+create or replace function public.admin_eliminar_usuario(p_clave text, p_usuario uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_familia uuid;
 begin
-  v_familia := public._admin_ok(p_admin, p_pin);
-  if not exists (select 1 from public.retos where id = p_reto and familia_id = v_familia) then
-    raise exception 'reto_no_existe';
-  end if;
+  perform public._admin_ok(p_clave);
+  delete from public.usuarios where id = p_usuario;   -- borra también sus fotos, puntos, clave y sesiones
+end $$;
+
+create or replace function public.admin_restablecer_clave(p_clave text, p_usuario uuid, p_nueva text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform public._admin_ok(p_clave);
+  if char_length(coalesce(p_nueva, '')) < 4 then raise exception 'clave_corta'; end if;
+  update public.credenciales set clave_hash = crypt(p_nueva, gen_salt('bf')) where usuario_id = p_usuario;
+  if not found then raise exception 'usuario_no_existe'; end if;
+  delete from public.sesiones where usuario_id = p_usuario;
+end $$;
+
+create or replace function public.admin_cancelar_reto(p_clave text, p_reto uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._admin_ok(p_clave);
   perform public._cerrar_reto(p_reto, 'cancelado', null);
 end $$;
 
--- Eliminar un reto por completo (activo o pasado), con sus fotos y sus puntos.
-create or replace function public.admin_eliminar_reto(p_admin uuid, p_pin text, p_reto uuid)
+create or replace function public.admin_eliminar_reto(p_clave text, p_reto uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_familia uuid;
 begin
-  v_familia := public._admin_ok(p_admin, p_pin);
-  delete from public.retos where id = p_reto and familia_id = v_familia;
-  if not found then raise exception 'reto_no_existe'; end if;
-end $$;
-
--- Dar o quitar el papel de administrador a otro jugador de la familia.
-create or replace function public.admin_cambiar_rol(p_admin uuid, p_pin text, p_jugador uuid, p_es_admin boolean)
-returns void language plpgsql security definer set search_path = public as $$
-declare v_familia uuid;
-begin
-  v_familia := public._admin_ok(p_admin, p_pin);
-  if not exists (select 1 from public.jugadores where id = p_jugador and familia_id = v_familia) then
-    raise exception 'jugador_no_es_de_la_familia';
-  end if;
-  if not p_es_admin and (select count(*) from public.jugadores where familia_id = v_familia and es_admin) <= 1 then
-    raise exception 'ultimo_admin';
-  end if;
-  update public.jugadores set es_admin = p_es_admin where id = p_jugador;
-  if not p_es_admin then delete from public.admin_pins where jugador_id = p_jugador; end if;
+  perform public._admin_ok(p_clave);
+  delete from public.retos where id = p_reto;   -- borra también sus fotos y puntos
 end $$;
 
 grant execute on function
-  public.revisar_retos(uuid),
-  public.admin_tiene_pin(uuid),
-  public.admin_definir_pin(uuid, text, text),
-  public.admin_entrar(uuid, text),
-  public.admin_cancelar_reto(uuid, text, uuid),
-  public.admin_eliminar_reto(uuid, text, uuid),
-  public.admin_cambiar_rol(uuid, text, uuid, boolean),
-  public.crear_familia(text),
-  public.buscar_familia(text),
-  public.unirse_familia(uuid, text, text),
-  public.editar_jugador(uuid, text, text),
+  public.registrar_usuario(text, text, text, text),
+  public.iniciar_sesion(text, text),
+  public.cerrar_sesion(uuid),
+  public.yo(uuid),
+  public.editar_perfil(uuid, text, text),
+  public.cambiar_clave(uuid, text, text),
+  public.revisar_retos(),
   public.crear_reto(uuid, text, text, int, int),
   public.registrar_foto(uuid, uuid, text),
   public.borrar_foto(uuid, uuid),
-  public.cancelar_reto(uuid, uuid)
+  public.cancelar_reto(uuid, uuid),
+  public.admin_entrar(text),
+  public.admin_cambiar_clave(text, text),
+  public.admin_eliminar_usuario(text, uuid),
+  public.admin_restablecer_clave(text, uuid, text),
+  public.admin_cancelar_reto(text, uuid),
+  public.admin_eliminar_reto(text, uuid)
 to anon, authenticated;
 
--- ----------------------------------------------------- tiempo real
+-- ------------------------------------------------------- tiempo real
 do $$
 declare t text;
 begin
-  foreach t in array array['familias', 'jugadores', 'retos', 'fotos', 'puntajes'] loop
-    if not exists (
-      select 1 from pg_publication_tables
-       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
-    ) then
+  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes'] loop
+    if not exists (select 1 from pg_publication_tables
+                    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
     end if;
   end loop;
 end $$;
 
--- ------------------------------------------- almacenamiento de fotos
+-- ------------------------------------------------ almacenamiento de fotos
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('retos-fotos', 'retos-fotos', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do update
-  set public = true, file_size_limit = excluded.file_size_limit,
-      allowed_mime_types = excluded.allowed_mime_types;
+  set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "subir fotos de retos" on storage.objects;
 create policy "subir fotos de retos" on storage.objects
-  for insert to anon, authenticated
-  with check (bucket_id = 'retos-fotos');
+  for insert to anon, authenticated with check (bucket_id = 'retos-fotos');
