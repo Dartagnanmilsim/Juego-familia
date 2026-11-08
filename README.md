@@ -13,6 +13,9 @@ Tres módulos (pestañas abajo de la cabecera):
   para avisar al juez. Fotos solo en el momento, con la cámara del juego.
 - **Avisos por WhatsApp:** al crear un reto aparece «Avisar por WhatsApp» con el mensaje ya escrito (reto, juez,
   participantes, hora de fin y enlace directo al reto). También se puede recordar un reto en marcha y compartir el resultado.
+- **🏆 Podio:** el administrador crea campeonatos juntando varios retos (por ejemplo, el 1 y el 3). Se suman los puntos
+  de esos retos y sale un podio con el campeón. Desempate: más retos ganados y luego más fotos aceptadas; si sigue el
+  empate, se muestra como empate en el primer puesto.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

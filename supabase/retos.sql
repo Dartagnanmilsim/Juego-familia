@@ -13,6 +13,8 @@
 --                     las fotos. Solo cuentan las fotos aceptadas por el juez.
 --                     Los competidores pueden marcar fotos ajenas con
 --                     "aceptar" o "denunciar" para avisar al juez.
+--    Campeonatos   -> el administrador agrupa retos en un campeonato; se suman
+--                     los puntos de esos retos y sale un podio con su campeón.
 --    Administrador -> entra con su clave (al principio 1234) y puede eliminar
 --                     usuarios y retos, y restablecer claves.
 --
@@ -102,6 +104,18 @@ create table if not exists public.participantes (
   primary key (reto_id, usuario_id)
 );
 
+-- Campeonatos: grupos de retos cuyos puntos se suman para sacar un campeón.
+create table if not exists public.campeonatos (
+  id        uuid primary key default gen_random_uuid(),
+  nombre    text not null check (char_length(nombre) between 1 and 60),
+  creado_en timestamptz not null default now()
+);
+create table if not exists public.campeonato_retos (
+  campeonato_id uuid not null references public.campeonatos(id) on delete cascade,
+  reto_id       uuid not null references public.retos(id) on delete cascade,
+  primary key (campeonato_id, reto_id)
+);
+
 create table if not exists public.puntajes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
   usuario_id uuid not null references public.usuarios(id) on delete cascade,
@@ -125,6 +139,8 @@ alter table public.fotos        enable row level security;
 alter table public.puntajes     enable row level security;
 alter table public.votos        enable row level security;
 alter table public.participantes enable row level security;
+alter table public.campeonatos enable row level security;
+alter table public.campeonato_retos enable row level security;
 
 drop policy if exists "leer usuarios" on public.usuarios;
 drop policy if exists "leer retos"    on public.retos;
@@ -132,15 +148,21 @@ drop policy if exists "leer fotos"    on public.fotos;
 drop policy if exists "leer puntajes" on public.puntajes;
 drop policy if exists "leer votos"    on public.votos;
 drop policy if exists "leer participantes" on public.participantes;
+drop policy if exists "leer campeonatos" on public.campeonatos;
+drop policy if exists "leer campeonato_retos" on public.campeonato_retos;
 create policy "leer usuarios" on public.usuarios for select to anon, authenticated using (true);
 create policy "leer retos"    on public.retos    for select to anon, authenticated using (true);
 create policy "leer fotos"    on public.fotos    for select to anon, authenticated using (true);
 create policy "leer puntajes" on public.puntajes for select to anon, authenticated using (true);
 create policy "leer votos"    on public.votos    for select to anon, authenticated using (true);
 create policy "leer participantes" on public.participantes for select to anon, authenticated using (true);
+create policy "leer campeonatos" on public.campeonatos for select to anon, authenticated using (true);
+create policy "leer campeonato_retos" on public.campeonato_retos for select to anon, authenticated using (true);
 
-grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes to anon, authenticated;
-revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes from anon, authenticated;
+grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes,
+  public.campeonatos, public.campeonato_retos to anon, authenticated;
+revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes,
+  public.campeonatos, public.campeonato_retos from anon, authenticated;
 revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
 
 -- ------------------------------------------------------ funciones internas
@@ -431,6 +453,33 @@ begin
   delete from public.retos where id = p_reto;   -- borra también sus fotos y puntos
 end $$;
 
+-- Crear o editar un campeonato (p_id null = nuevo). p_retos: los retos que suman puntos.
+create or replace function public.admin_guardar_campeonato(p_clave text, p_id uuid, p_nombre text, p_retos uuid[])
+returns public.campeonatos language plpgsql security definer set search_path = public as $$
+declare c public.campeonatos;
+begin
+  perform public._admin_ok(p_clave);
+  if char_length(trim(coalesce(p_nombre, ''))) not between 1 and 60 then raise exception 'nombre_invalido'; end if;
+  if not exists (select 1 from public.retos where id = any(coalesce(p_retos, '{}'))) then raise exception 'campeonato_sin_retos'; end if;
+  if p_id is null then
+    insert into public.campeonatos (nombre) values (trim(p_nombre)) returning * into c;
+  else
+    update public.campeonatos set nombre = trim(p_nombre) where id = p_id returning * into c;
+    if c.id is null then raise exception 'campeonato_no_existe'; end if;
+    delete from public.campeonato_retos where campeonato_id = c.id;
+  end if;
+  insert into public.campeonato_retos (campeonato_id, reto_id)
+  select c.id, id from public.retos where id = any(p_retos);
+  return c;
+end $$;
+
+create or replace function public.admin_eliminar_campeonato(p_clave text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._admin_ok(p_clave);
+  delete from public.campeonatos where id = p_id;   -- no borra los retos
+end $$;
+
 grant execute on function
   public.registrar_usuario(text, text, text, text),
   public.iniciar_sesion(text, text),
@@ -448,14 +497,16 @@ grant execute on function
   public.admin_cambiar_clave(text, text),
   public.admin_eliminar_usuario(text, uuid),
   public.admin_restablecer_clave(text, uuid, text),
-  public.admin_eliminar_reto(text, uuid)
+  public.admin_eliminar_reto(text, uuid),
+  public.admin_guardar_campeonato(text, uuid, text, uuid[]),
+  public.admin_eliminar_campeonato(text, uuid)
 to anon, authenticated;
 
 -- ------------------------------------------------------- tiempo real
 do $$
 declare t text;
 begin
-  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos', 'participantes'] loop
+  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos', 'participantes', 'campeonatos', 'campeonato_retos'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);
