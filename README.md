@@ -11,6 +11,8 @@ Tres módulos (pestañas abajo de la cabecera):
 - **🎯 Retos:** puede haber **varios retos a la vez**. Quien crea un reto elige si es **para todos** o **solo para algunos** jugadores, y elige un **juez**. El juez no compite: acepta ✅ o elimina 🗑️ las fotos.
   **Solo cuentan las fotos aceptadas por el juez.** Los competidores marcan las fotos de otros con 👍 aceptar o 🚩 denunciar
   para avisar al juez. Fotos solo en el momento, con la cámara del juego.
+- **Avisos por WhatsApp:** al crear un reto aparece «Avisar por WhatsApp» con el mensaje ya escrito (reto, juez,
+  participantes, hora de fin y enlace directo al reto). También se puede recordar un reto en marcha y compartir el resultado.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

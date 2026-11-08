@@ -54,6 +54,14 @@
   var draft = { emoji: "🎯", que: "", meta: 10, min: 60, juez: null, todos: true, parts: [] };
   var sel = null;                // reto abierto en el módulo Retos
   var creating = false;          // mostrando el formulario "crear reto"
+  var justCreated = null;        // id del reto recién creado: muestra "Avisar por WhatsApp" destacado
+  // Enlace directo a un reto: retos.html?reto=<id> (lo trae el mensaje de WhatsApp)
+  (function () {
+    try {
+      var q = new URLSearchParams(location.search).get("reto");
+      if (q) { sel = q; history.replaceState(null, "", location.pathname); }
+    } catch (e) {}
+  })();
   var newUser = null;            // formulario "crear usuario para otra persona"
   var channel = null, pollTimer = null, tickTimer = null, reloadTimer = null;
 
@@ -412,6 +420,41 @@
     return v;
   }
 
+  // ------------------------------------------------------------ avisos por WhatsApp
+  // Abre WhatsApp con el mensaje ya escrito; la persona elige el chat o grupo y lo envía.
+  var WA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2c-1.5 0-3-.4-4.3-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.3.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3a2.9 2.9 0 0 0-.9 2.2 5.1 5.1 0 0 0 1.1 2.7 11.6 11.6 0 0 0 4.4 3.9c1.6.7 2.3.8 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3z"/></svg>';
+  function gameUrl(r) { return location.origin + location.pathname + (r ? "?reto=" + r.id : ""); }
+  function fmtFin(r) {
+    try { return new Date(r.termina_en).toLocaleString("es", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+    catch (e) { return ""; }
+  }
+  function textoReto(r, nuevo) {
+    var juez = user(juezDe(r));
+    var quien = r.para_todos !== false ? "Todos" : competidores(r).map(function (u) { return u.nombre; }).join(", ");
+    return (nuevo ? "🎯 *¡Nuevo reto!*" : "⏱️ *Reto en marcha* (quedan " + fmtLeft(new Date(r.termina_en) - Date.now()) + ")") + "\n\n" +
+      r.emoji + " Gana el primero en conseguir *" + r.meta + (r.meta === 1 ? " foto" : " fotos") + "* de: *" + r.que_buscar + "*\n" +
+      "👥 Participan: " + quien + "\n" +
+      "⚖️ Juez: " + juez.nombre + " (acepta o elimina las fotos)\n" +
+      "🏁 Termina: " + fmtFin(r) + "\n\n" +
+      "Entra y haz tus fotos aquí 👇\n" + gameUrl(r);
+  }
+  function textoResultado(r) {
+    var w = r.ganador_id ? user(r.ganador_id) : null;
+    var pos = data.puntajes.filter(function (p) { return p.reto_id === r.id; }).sort(function (a, b) { return a.puesto - b.puesto; });
+    var medallas = ["🥇", "🥈", "🥉"];
+    return "🏆 *Resultado del reto*\n\n" + r.emoji + " " + r.meta + (r.meta === 1 ? " foto" : " fotos") + " de: *" + r.que_buscar + "*\n\n" +
+      (w ? "¡Ganó *" + w.nombre + "*! " + (r.motivo === "meta" ? "Llegó primero a la meta." : "Tenía más fotos aceptadas al acabar el tiempo.") + "\n"
+         : "Nadie consiguió fotos aceptadas.\n") +
+      (pos.length ? "\n" + pos.map(function (p) {
+        return (medallas[p.puesto - 1] || p.puesto + ".") + " " + user(p.usuario_id).nombre + " · " + p.fotos + (p.fotos === 1 ? " foto" : " fotos") + " · +" + p.puntos + " pts";
+      }).join("\n") + "\n" : "") +
+      "\nVer el reto 👇\n" + gameUrl(r);
+  }
+  function waButton(text, label, extra) {
+    return '<a class="btn wa' + (extra ? " " + extra : "") + '" target="_blank" rel="noopener" href="https://wa.me/?text=' +
+      encodeURIComponent(text) + '">' + WA_ICON + '<span>' + label + '</span></a>';
+  }
+
   // ============================================================ MÓDULO RETOS
   function renderGame() {
     var r = sel && retoById(sel);
@@ -476,7 +519,12 @@
     } else {
       accion = '<div class="judge-box out-box"><b>No participas en este reto</b>Puedes ver cómo va, pero no hacer fotos ni marcarlas.</div>';
     }
-    return '<section class="card active">' +
+    var aviso = justCreated === r.id
+      ? '<section class="card wa-card"><h2>Reto creado</h2><p class="sub">Avisa a los participantes para que empiecen a buscar. ' +
+        'Se abrirá WhatsApp con el mensaje escrito: elige el grupo o la persona y envíalo.</p>' +
+        waButton(textoReto(r, true), "Avisar por WhatsApp", "wide") + '</section>'
+      : "";
+    return aviso + '<section class="card active">' +
       '<div class="tag live">En marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
@@ -492,6 +540,7 @@
           '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + ' pend.</small>' : "") + '</span></li>';
       }).join("") + '</ul>' +
       '</section>' +
+      (justCreated === r.id ? "" : '<div class="wa-row">' + waButton(textoReto(r, false), "Recordar por WhatsApp", "ghost-wa") + '</div>') +
       '<section class="card"><h2>Fotos <span class="count">' + fotos.length + '</span></h2>' +
       (fotos.length
         ? (participo ? '<p class="hint">Si una foto de otro jugador vale, márcala como «Válida»; si no, «Denunciar». El juez lo verá.</p>' : "") +
@@ -518,6 +567,7 @@
       }).join("") + '</ol>' : "") +
       '<p class="sub">Juez: ' + esc(user(juezDe(r)).nombre) + '</p>' +
       (fotos.length ? '<div class="gallery">' + fotos.map(thumb).join("") + '</div>' : "") +
+      (r.estado === "terminado" ? waButton(textoResultado(r), "Compartir resultado por WhatsApp", "wide") : "") +
       '</section>';
   }
 
@@ -611,7 +661,7 @@
   }
 
   function openReto(id) { sel = id; creating = false; window.scrollTo(0, 0); reload(); render(); }
-  function backToList() { sel = null; creating = false; render(); window.scrollTo(0, 0); }
+  function backToList() { sel = null; creating = false; justCreated = null; render(); window.scrollTo(0, 0); }
 
   function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
@@ -674,7 +724,7 @@
         }));
         say("¡Reto lanzado! Gana el primero en conseguir " + draft.meta + " fotos de " + draft.que);
         draft.que = ""; draft.parts = []; draft.todos = true;
-        creating = false; sel = nuevo.id;
+        creating = false; sel = nuevo.id; justCreated = nuevo.id;
         await reload();
       });
     };

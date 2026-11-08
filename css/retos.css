@@ -392,3 +392,14 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
   .tag.live::before, .party-box, .confetti { animation: none; }
   .confetti { display: none; }
 }
+
+/* ---------- Avisos por WhatsApp ---------- */
+.btn.wa { background: #25d366; color: #fff; text-decoration: none; }
+.btn.wa svg { width: 20px; height: 20px; flex: none; }
+.btn.wa.ghost-wa { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn.wa.ghost-wa svg { color: #25d366; }
+.wa-card { border-color: color-mix(in srgb, #25d366 45%, var(--line)); background: color-mix(in srgb, #25d366 7%, var(--surface)); }
+.wa-card h2 { margin-bottom: 4px; }
+.wa-row { display: flex; }
+.wa-row .btn { width: 100%; }
+.result .btn.wa { margin-top: 16px; }
