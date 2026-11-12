@@ -15,6 +15,9 @@
 --                     "aceptar" o "denunciar" para avisar al juez.
 --    Campeonatos   -> el administrador agrupa retos en un campeonato; se suman
 --                     los puntos de esos retos y sale un podio con su campeón.
+--    Reglas        -> los retos solo se pueden crear dentro de un horario
+--                     (al principio de 8:00 a 18:00, hora de Colombia). El
+--                     administrador puede cambiar las horas y la zona horaria.
 --    Administrador -> entra con su clave (al principio 1234) y puede eliminar
 --                     usuarios y retos, y restablecer claves.
 --
@@ -51,6 +54,10 @@ create table if not exists public.admin_config (
   id         int primary key default 1 check (id = 1),
   clave_hash text not null
 );
+-- Horario en el que se pueden crear retos (hora_fin no incluida: 8 a 18 = de 8:00 a 17:59)
+alter table public.admin_config add column if not exists hora_inicio int not null default 8;
+alter table public.admin_config add column if not exists hora_fin int not null default 18;
+alter table public.admin_config add column if not exists zona_horaria text not null default 'America/Bogota';
 
 create table if not exists public.retos (
   id          uuid primary key default gen_random_uuid(),
@@ -292,6 +299,17 @@ begin
   end loop;
 end $$;
 
+-- Reglas del juego para la app: horario de creación de retos y si ahora está abierto.
+create or replace function public.reglas_juego()
+returns json language sql security definer set search_path = public as $$
+  select json_build_object(
+    'hora_inicio', hora_inicio, 'hora_fin', hora_fin, 'zona_horaria', zona_horaria,
+    'hora_local', to_char(now() at time zone zona_horaria, 'HH24:MI'),
+    'abierto', extract(hour from now() at time zone zona_horaria) >= hora_inicio
+           and extract(hour from now() at time zone zona_horaria) < hora_fin)
+  from public.admin_config where id = 1;
+$$;
+
 -- Las funciones antiguas que ya no se usan
 drop function if exists public.crear_reto(uuid, text, text, int, int);
 drop function if exists public.crear_reto(uuid, text, text, int, int, uuid);
@@ -326,6 +344,7 @@ declare v uuid := public._usuario_de(p_token); r public.retos; v_juez uuid := co
         v_todos boolean := coalesce(p_para_todos, true); n int;
 begin
   if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then raise exception 'duracion_invalida'; end if;
+  if not coalesce((public.reglas_juego()->>'abierto')::boolean, true) then raise exception 'fuera_de_horario'; end if;
   if not exists (select 1 from public.usuarios where id = v_juez) then raise exception 'juez_no_existe'; end if;
   if not v_todos then
     select count(*) into n from public.usuarios
@@ -473,6 +492,17 @@ begin
   return c;
 end $$;
 
+-- El administrador cambia el horario de creación de retos y la zona horaria.
+create or replace function public.admin_guardar_reglas(p_clave text, p_inicio int, p_fin int, p_zona text)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform public._admin_ok(p_clave);
+  if p_inicio is null or p_fin is null or p_inicio < 0 or p_fin > 24 or p_inicio >= p_fin then raise exception 'horario_invalido'; end if;
+  if not exists (select 1 from pg_timezone_names where name = p_zona) then raise exception 'zona_invalida'; end if;
+  update public.admin_config set hora_inicio = p_inicio, hora_fin = p_fin, zona_horaria = p_zona where id = 1;
+  return public.reglas_juego();
+end $$;
+
 create or replace function public.admin_eliminar_campeonato(p_clave text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -499,7 +529,9 @@ grant execute on function
   public.admin_restablecer_clave(text, uuid, text),
   public.admin_eliminar_reto(text, uuid),
   public.admin_guardar_campeonato(text, uuid, text, uuid[]),
-  public.admin_eliminar_campeonato(text, uuid)
+  public.admin_eliminar_campeonato(text, uuid),
+  public.reglas_juego(),
+  public.admin_guardar_reglas(text, int, int, text)
 to anon, authenticated;
 
 -- ------------------------------------------------------- tiempo real

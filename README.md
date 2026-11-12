@@ -16,6 +16,9 @@ Tres módulos (pestañas abajo de la cabecera):
 - **🏆 Podio:** el administrador crea campeonatos juntando varios retos (por ejemplo, el 1 y el 3). Se suman los puntos
   de esos retos y sale un podio con el campeón. Desempate: más retos ganados y luego más fotos aceptadas; si sigue el
   empate, se muestra como empate en el primer puesto.
+- **⏰ Regla de horario:** los retos solo se pueden crear de 8:00 a 18:00 (hora de Colombia al principio). Fuera de ese
+  horario el botón «Crear reto» se bloquea y la base de datos también lo impide. Los retos en marcha no se ven afectados.
+  El administrador puede cambiar las horas y la zona horaria en «Reglas».
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

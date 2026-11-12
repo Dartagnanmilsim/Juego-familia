@@ -441,3 +441,15 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .camp-form .row { justify-content: flex-end; }
 .empty-state .sub { margin-bottom: 0; }
 .champion small { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+/* ---------- Reglas: horario para crear retos ---------- */
+.closed-box { margin: 0; background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); font-size: 14px; }
+.closed-box > b:first-child { display: block; font-size: 15px; margin-bottom: 4px; }
+select {
+  width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 16px;
+}
+select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.row.hours { margin-top: 0; }
+.row.hours label { flex: 1; display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+#rgMovil { justify-self: start; }

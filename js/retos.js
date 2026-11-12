@@ -42,7 +42,10 @@
     reto_no_existe: "Ese reto ya no existe.",
     campeonato_sin_retos: "Elige al menos un reto para el campeonato.",
     campeonato_no_existe: "Ese campeonato ya no existe.",
-    nombre_invalido: "Escribe un nombre (máximo 60 caracteres)."
+    nombre_invalido: "Escribe un nombre (máximo 60 caracteres).",
+    fuera_de_horario: "Ahora no se pueden crear retos: estás fuera del horario permitido.",
+    horario_invalido: "La hora de inicio debe ser anterior a la de fin.",
+    zona_invalida: "Esa zona horaria no existe."
   };
 
   var $app = document.getElementById("app");
@@ -346,7 +349,8 @@
         db.from("campeonato_retos").select("*")
       ]);
       var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), participantes: must(r[3]),
-        campeonatos: must(r[4]), campeonatoRetos: must(r[5]), fotos: [], votos: [] };
+        campeonatos: must(r[4]), campeonatoRetos: must(r[5]), fotos: [], votos: [], reglas: null };
+      try { var rg = await db.rpc("reglas_juego"); if (!rg.error) next.reglas = rg.data; } catch (e) {}
       var ids = next.retos.filter(function (x) { return x.estado === "activo" || x.id === sel; }).map(function (x) { return x.id; });
       var fv = await Promise.all(ids.map(function (id) {
         return Promise.all([
@@ -482,6 +486,41 @@
     return '<span class="role out">No participas</span>';
   }
 
+  // ------------------------------------------------------------ horario para crear retos
+  var ZONAS = [
+    ["America/Bogota", "Colombia"], ["America/Mexico_City", "México (centro)"], ["America/Lima", "Perú"],
+    ["America/Guayaquil", "Ecuador"], ["America/Panama", "Panamá"], ["America/Caracas", "Venezuela"],
+    ["America/Santo_Domingo", "República Dominicana"], ["America/Puerto_Rico", "Puerto Rico"],
+    ["America/La_Paz", "Bolivia"], ["America/Santiago", "Chile"], ["America/Asuncion", "Paraguay"],
+    ["America/Argentina/Buenos_Aires", "Argentina"], ["America/Montevideo", "Uruguay"], ["America/Sao_Paulo", "Brasil (São Paulo)"],
+    ["America/Guatemala", "Guatemala / Centroamérica"], ["America/New_York", "EE. UU. (este)"], ["America/Chicago", "EE. UU. (centro)"],
+    ["America/Los_Angeles", "EE. UU. (pacífico)"], ["Europe/Madrid", "España"]
+  ];
+  function nombreZona(z) {
+    var m = ZONAS.filter(function (x) { return x[0] === z; })[0];
+    return m ? m[1] : z;
+  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function horaEnZona(z) {
+    try {
+      var parts = new Intl.DateTimeFormat("en-GB", { timeZone: z, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+      var h = +parts.filter(function (x) { return x.type === "hour"; })[0].value, m = +parts.filter(function (x) { return x.type === "minute"; })[0].value;
+      return { h: h % 24, m: m };
+    } catch (e) { return null; }
+  }
+  // ¿Se pueden crear retos ahora? (la base de datos lo vuelve a comprobar al crear)
+  function horario() {
+    var rg = data && data.reglas;
+    if (!rg) return { abierto: true, texto: "" };
+    var t = horaEnZona(rg.zona_horaria), abierto = t ? (t.h >= rg.hora_inicio && t.h < rg.hora_fin) : rg.abierto;
+    var ahora = t ? pad2(t.h) + ":" + pad2(t.m) : rg.hora_local;
+    return {
+      abierto: abierto, ahora: ahora,
+      rango: pad2(rg.hora_inicio) + ":00 a " + pad2(rg.hora_fin) + ":00",
+      zona: nombreZona(rg.zona_horaria)
+    };
+  }
+
   function renderList() {
     var act = activos();
     // primero los retos donde participo o soy juez
@@ -489,7 +528,11 @@
       var pa = (juezDe(a) === me.id || compite(a, me.id)) ? 0 : 1, pb = (juezDe(b) === me.id || compite(b, me.id)) ? 0 : 1;
       return pa - pb || new Date(a.termina_en) - new Date(b.termina_en);
     });
-    return '<button class="btn primary wide new-reto" id="newReto">+ Crear reto</button>' +
+    var hz = horario();
+    return (hz.abierto
+        ? '<button class="btn primary wide new-reto" id="newReto">+ Crear reto</button>'
+        : '<div class="card closed-box"><b>Fuera del horario para crear retos</b>Los retos se crean de <b>' + hz.rango + '</b> (hora de ' + esc(hz.zona) + '). ' +
+          'Ahora son las ' + hz.ahora + '. Los retos en marcha siguen igual.</div>') +
       '<section class="card"><h2>En marcha <span class="count">' + act.length + '</span></h2>' +
       (act.length ? '<ul class="reto-list">' + act.map(function (r) {
         var c = counts(r.id), mine = c[me.id] || { ok: 0, pend: 0 };
@@ -503,7 +546,7 @@
           (compite(r, me.id) ? '<small>Tus fotos aceptadas: <b>' + mine.ok + '/' + r.meta + '</b>' + (mine.pend ? " · " + mine.pend + " esperando" : "") + '</small>' : "") +
           (juezDe(r) === me.id && pend ? '<small class="to-review">' + pend + ' foto' + (pend === 1 ? "" : "s") + ' por revisar</small>' : "") +
           '</span><span class="reto-go">›</span></button></li>';
-      }).join("") + '</ul>' : '<p class="hint">No hay retos en marcha. ¡Crea uno!</p>') +
+      }).join("") + '</ul>' : '<p class="hint">No hay retos en marcha.' + (hz.abierto ? ' ¡Crea uno!' : '') + '</p>') +
       '</section>';
   }
 
@@ -608,6 +651,7 @@
     return '<button class="btn ghost back-btn" id="backList">← Volver a los retos</button>' +
       '<section class="card">' +
       '<h2>Nuevo reto</h2>' +
+      (data.reglas ? '<p class="hint">Horario para crear retos: ' + horario().rango + ' (hora de ' + esc(horario().zona) + ').</p>' : "") +
       '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
       '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
       '<input id="rQue" maxlength="60" value="' + esc(draft.que) + '" placeholder="Ej: gente con sombrero"></div>' +
@@ -724,6 +768,8 @@
     };
     el("launch").onclick = function () {
       if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
+      var hz = horario();
+      if (!hz.abierto) return toast("Solo se pueden crear retos de " + hz.rango + " (hora de " + hz.zona + "). Ahora son las " + hz.ahora + ".", 5000);
       var parts = draft.parts.filter(function (x) { return x !== draft.juez; });
       if (!draft.todos && !parts.length) return toast(ERRORS.sin_participantes);
       guard(async function () {
@@ -1051,6 +1097,7 @@
           '<button class="btn small danger" data-act="del-user" data-id="' + u.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : '<p class="hint">Todavía no hay usuarios.</p>') +
       '</section>' +
+      renderReglasAdmin() +
       renderCampAdmin() +
       '<section class="card admin"><h2>Clave de administrador</h2>' +
       '<form id="admNewForm" class="row"><input id="admNew" type="password" autocomplete="new-password" placeholder="Nueva clave" required>' +
@@ -1060,12 +1107,51 @@
     $app.querySelectorAll("[data-act]").forEach(function (b) { b.onclick = function () { adminAction(b.dataset.act, b.dataset.id); }; });
     el("admExit").onclick = exitAdmin;
     bindCampAdmin();
+    bindReglasAdmin();
     el("admNewForm").onsubmit = function (e) {
       e.preventDefault();
       var nueva = el("admNew").value;
       guard(async function () {
         must(await db.rpc("admin_cambiar_clave", { p_clave: adminClave, p_nueva: nueva }));
         adminClave = nueva; toast("Clave de administrador cambiada"); el("admNewForm").reset();
+      });
+    };
+  }
+
+  function renderReglasAdmin() {
+    var rg = data.reglas;
+    if (!rg) return "";
+    var movil = ""; try { movil = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+    var zonas = ZONAS.slice();
+    [rg.zona_horaria, movil].forEach(function (z) { if (z && !zonas.some(function (x) { return x[0] === z; })) zonas.push([z, z]); });
+    var horas = function (id, val, from, to) {
+      var o = ""; for (var h = from; h <= to; h++) o += '<option value="' + h + '"' + (h === val ? " selected" : "") + '>' + pad2(h) + ':00' + '</option>';
+      return '<select id="' + id + '">' + o + '</select>';
+    };
+    var hz = horario();
+    return '<section class="card admin"><h2>Reglas</h2>' +
+      '<p class="hint">Horario en el que se pueden crear retos. Fuera de este horario el botón «Crear reto» se bloquea; los retos en marcha no se ven afectados.</p>' +
+      '<form id="reglasForm" class="stack-form">' +
+      '<div class="row hours"><label>Desde' + horas("rgIni", rg.hora_inicio, 0, 23) + '</label><label>Hasta' + horas("rgFin", rg.hora_fin, 1, 24) + '</label></div>' +
+      '<label class="label" for="rgZona">Zona horaria</label>' +
+      '<select id="rgZona">' + zonas.map(function (z) { return '<option value="' + esc(z[0]) + '"' + (z[0] === rg.zona_horaria ? " selected" : "") + '>' + esc(z[1]) + '</option>'; }).join("") + '</select>' +
+      (movil && movil !== rg.zona_horaria ? '<button type="button" class="btn small ghost" id="rgMovil" data-z="' + esc(movil) + '">Usar la hora de este móvil (' + esc(nombreZona(movil)) + ')</button>' : "") +
+      '<p class="hint">Ahora mismo son las <b>' + hz.ahora + '</b> en ' + esc(hz.zona) + ': ' + (hz.abierto ? "se pueden crear retos." : "no se pueden crear retos.") + '</p>' +
+      '<button class="btn primary wide">Guardar reglas</button></form></section>';
+  }
+
+  function bindReglasAdmin() {
+    if (!el("reglasForm")) return;
+    if (el("rgMovil")) el("rgMovil").onclick = function () { el("rgZona").value = this.dataset.z; };
+    el("reglasForm").onsubmit = function (e) {
+      e.preventDefault();
+      var ini = +el("rgIni").value, fin = +el("rgFin").value, zona = el("rgZona").value;
+      if (ini >= fin) return toast(ERRORS.horario_invalido);
+      guard(async function () {
+        var rg = must(await db.rpc("admin_guardar_reglas", { p_clave: adminClave, p_inicio: ini, p_fin: fin, p_zona: zona }));
+        data.reglas = rg;
+        toast("Reglas guardadas: retos de " + pad2(ini) + ":00 a " + pad2(fin) + ":00 (hora de " + nombreZona(zona) + ")", 4500);
+        renderAdmin();
       });
     };
   }
