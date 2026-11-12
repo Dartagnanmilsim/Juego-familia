@@ -819,7 +819,58 @@
 
   // ------------------------------------------------------------ cámara en vivo
   // Las fotos solo se hacen aquí, en el momento: no hay forma de adjuntar archivos.
-  var cam = { stream: null, reto: null, facing: "environment", shot: null };
+  var cam = { stream: null, reto: null, facing: "environment", shot: null,
+              zoom: 1, maxZoom: 5, hw: null, hwApplied: 1, digital: 1, pending: false };
+
+  // ---- zoom: usa el zoom real de la cámara si el móvil lo permite; si no, zoom digital (recorta el centro)
+  function zoomTrack() { return cam.stream && cam.stream.getVideoTracks()[0]; }
+  function setupZoom() {
+    cam.hw = null;
+    var t = zoomTrack();
+    try {
+      var caps = t && t.getCapabilities ? t.getCapabilities() : null;
+      if (caps && caps.zoom && caps.zoom.max > caps.zoom.min) cam.hw = { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1 };
+    } catch (e) {}
+    cam.maxZoom = cam.hw ? Math.min(10, Math.max(5, cam.hw.max)) : 5;
+    el("camZoom").max = cam.maxZoom;
+    [].forEach.call(el("zoomPresets").children, function (b) { b.hidden = +b.dataset.z > cam.maxZoom; });
+    setZoom(1, true);
+  }
+  function setZoom(z, now) {
+    cam.zoom = Math.max(1, Math.min(cam.maxZoom, Math.round(z * 10) / 10));
+    el("camZoom").value = cam.zoom;
+    el("camZoomLabel").textContent = (cam.zoom % 1 ? cam.zoom.toFixed(1) : cam.zoom) + "×";
+    el("camZoomLabel").classList.toggle("show", cam.zoom > 1);
+    [].forEach.call(el("zoomPresets").children, function (b) { b.classList.toggle("on", Math.abs(+b.dataset.z - cam.zoom) < 0.05); });
+    if (now) applyZoom(); else if (!cam.pending) { cam.pending = true; requestAnimationFrame(applyZoom); }
+  }
+  function applyZoom() {
+    cam.pending = false;
+    var z = cam.zoom, t = zoomTrack(), hwz = 1;
+    if (cam.hw && t) {
+      hwz = Math.max(cam.hw.min, Math.min(cam.hw.max, z));
+      if (Math.abs(hwz - cam.hwApplied) > 0.01) {
+        cam.hwApplied = hwz;
+        t.applyConstraints({ advanced: [{ zoom: hwz }] }).catch(function () { cam.hw = null; cam.hwApplied = 1; applyZoom(); });
+      }
+    } else { cam.hwApplied = 1; }
+    cam.digital = Math.max(1, z / (cam.hw ? hwz : 1));
+    var mirror = cam.facing === "user" ? -1 : 1;
+    el("camVideo").style.transform = "scale(" + (mirror * cam.digital) + ", " + cam.digital + ")";
+  }
+  // Pellizcar con dos dedos para hacer zoom
+  (function () {
+    var start = null;
+    function dist(t) { var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY; return Math.sqrt(dx * dx + dy * dy); }
+    var view = el("camView");
+    view.addEventListener("touchstart", function (e) { if (e.touches.length === 2) start = { d: dist(e.touches), z: cam.zoom }; }, { passive: true });
+    view.addEventListener("touchmove", function (e) {
+      if (start && e.touches.length === 2) { e.preventDefault(); setZoom(start.z * dist(e.touches) / start.d); }
+    }, { passive: false });
+    view.addEventListener("touchend", function (e) { if (e.touches.length < 2) start = null; });
+  })();
+  el("camZoom").oninput = function () { setZoom(+this.value); };
+  el("zoomPresets").onclick = function (e) { var b = e.target.closest("button"); if (b) setZoom(+b.dataset.z); };
   function camMsg(text) { el("camMsg").textContent = text || ""; el("camMsg").hidden = !text; }
 
   async function startStream() {
@@ -837,6 +888,7 @@
       v.srcObject = cam.stream;
       v.classList.toggle("mirror", cam.facing === "user");
       await v.play().catch(function () {});
+      cam.hwApplied = 1; setupZoom();
       camMsg(""); el("camShutter").disabled = false;
     } catch (e) {
       el("camShutter").disabled = true;
@@ -863,12 +915,15 @@
   function takePhoto() {
     var v = el("camVideo");
     if (!v.videoWidth) return;
-    var k = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    // La foto sale con el zoom de la pantalla: con zoom digital se recorta el centro.
+    var d = cam.digital || 1, sw = v.videoWidth / d, sh = v.videoHeight / d;
+    var sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
+    var k = Math.min(1, 1280 / Math.max(sw, sh));
     var cv = document.createElement("canvas");
-    cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+    cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
     var g = cv.getContext("2d");
     if (cam.facing === "user") { g.translate(cv.width, 0); g.scale(-1, 1); }
-    g.drawImage(v, 0, 0, cv.width, cv.height);
+    g.drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
     cv.toBlob(function (b) {
       if (!b) return;
       cam.shot = b; el("camImg").src = URL.createObjectURL(b);

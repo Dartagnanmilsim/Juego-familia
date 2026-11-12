@@ -453,3 +453,21 @@ select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px
 .row.hours { margin-top: 0; }
 .row.hours label { flex: 1; display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
 #rgMovil { justify-self: start; }
+
+/* ---------- Zoom de la cámara ---------- */
+.cam-view { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; touch-action: none; }
+.cam-view video { flex: 1; min-height: 0; width: 100%; object-fit: contain; transform-origin: center center; }
+.cam-zoom-label {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  padding: 4px 10px; border-radius: 20px; background: rgba(0, 0, 0, 0.55); color: #fff;
+  font-size: 14px; font-weight: 700; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+.cam-zoom-label.show { opacity: 1; }
+.cam-zoom { display: grid; gap: 10px; padding: 12px 20px 0; }
+.zoom-presets { display: flex; justify-content: center; gap: 8px; }
+.zoom-presets button {
+  min-width: 44px; height: 34px; padding: 0 10px; border: none; border-radius: 17px;
+  background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 13px; font-weight: 700;
+}
+.zoom-presets button.on { background: #fff; color: #000; }
+#camZoom { width: 100%; padding: 0; border: none; background: transparent; accent-color: #fff; box-shadow: none; height: 28px; }

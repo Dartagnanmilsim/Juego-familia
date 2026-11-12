@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
   <title>Retos en familia</title>
-  <link rel="stylesheet" href="css/retos.css?v=11">
+  <link rel="stylesheet" href="css/retos.css?v=12">
 </head>
 <body>
 
@@ -36,8 +36,18 @@
 <div id="camera" class="camera-ov" hidden>
   <div class="cam-top"><span id="camTitle"></span><button id="camClose" class="cam-round" aria-label="Cerrar cámara">✕</button></div>
   <div id="camLive" class="cam-stage">
-    <video id="camVideo" autoplay playsinline muted></video>
+    <div id="camView" class="cam-view">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <span id="camZoomLabel" class="cam-zoom-label">1×</span>
+    </div>
     <p id="camMsg" class="cam-msg" hidden></p>
+    <div class="cam-zoom">
+      <div id="zoomPresets" class="zoom-presets">
+        <button type="button" data-z="1">1×</button><button type="button" data-z="2">2×</button>
+        <button type="button" data-z="3">3×</button><button type="button" data-z="5">5×</button>
+      </div>
+      <input type="range" id="camZoom" min="1" max="5" step="0.1" value="1" aria-label="Zoom">
+    </div>
     <div class="cam-bar">
       <span class="cam-side"></span>
       <button id="camShutter" class="cam-shutter" aria-label="Hacer foto" disabled></button>
@@ -77,6 +87,6 @@
 
 <script src="js/vendor/supabase-2.45.4.js"></script>
 <script src="js/retos-config.js?v=3"></script>
-<script src="js/retos.js?v=11"></script>
+<script src="js/retos.js?v=12"></script>
 </body>
 </html>
