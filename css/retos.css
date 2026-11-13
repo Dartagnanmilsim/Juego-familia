@@ -471,3 +471,21 @@ select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px
 }
 .zoom-presets button.on { background: #fff; color: #000; }
 #camZoom { width: 100%; padding: 0; border: none; background: transparent; accent-color: #fff; box-shadow: none; height: 28px; }
+
+/* ---------- Denuncias con motivo ---------- */
+.reports { list-style: none; margin: 4px 0 0; padding: 8px 10px; display: grid; gap: 4px; border-radius: 10px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); font-size: 13px; }
+.reports b { font-weight: 700; }
+.report-box { text-align: left; max-height: calc(100vh - 32px); overflow-y: auto; }
+.report-box h2 { margin-top: 12px; }
+.report-img { display: block; width: 100%; max-height: 180px; object-fit: cover; border-radius: 12px; background: var(--surface-2); }
+.report-chips { margin: 4px 0 10px; }
+textarea {
+  width: 100%; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 16px; resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.rep-count { text-align: right; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.report-actions { justify-content: flex-end; margin-top: 12px; }
+.report-actions .btn { width: auto; }
+.btn.danger-solid { background: var(--danger); color: #fff; }
+.photo-item.reported .btn.danger { background: var(--danger); color: #fff; }

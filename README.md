@@ -21,6 +21,8 @@ Tres módulos (pestañas abajo de la cabecera):
   El administrador puede cambiar las horas y la zona horaria en «Reglas».
 - **Zoom en la cámara:** pellizcar con dos dedos, botones 1×/2×/3×/5× o la barra. La foto sale con el zoom de la pantalla
   (zoom real del móvil si lo permite; si no, zoom digital recortando el centro).
+- **Denuncias con motivo:** al denunciar una foto hay que decir por qué (motivos rápidos o texto propio, hasta 200
+  caracteres). El juez y los jugadores ven debajo de la foto quién la denunció y por qué.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

@@ -64,6 +64,9 @@ create table if not exists public.votos (
   primary key (foto_id, usuario_id)
 );
 create index if not exists votos_reto_idx on public.votos(reto_id);
+alter table public.votos add column if not exists motivo text;
+alter table public.votos drop constraint if exists votos_motivo_check;
+alter table public.votos add constraint votos_motivo_check check (motivo is null or char_length(motivo) <= 200);
 create table if not exists public.participantes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
   usuario_id uuid not null references public.usuarios(id) on delete cascade,
@@ -296,9 +299,10 @@ begin
     from public.fotos where reto_id = p_reto and usuario_id = v;
   return json_build_object('fotos', n, 'aceptadas', a);
 end $$;
-create or replace function public.votar_foto(p_token uuid, p_foto uuid, p_tipo text)
+drop function if exists public.votar_foto(uuid, uuid, text);
+create or replace function public.votar_foto(p_token uuid, p_foto uuid, p_tipo text, p_motivo text)
 returns void language plpgsql security definer set search_path = public as $$
-declare v uuid := public._usuario_de(p_token); f public.fotos; r public.retos;
+declare v uuid := public._usuario_de(p_token); f public.fotos; r public.retos; m text := nullif(trim(coalesce(p_motivo, '')), '');
 begin
   select * into f from public.fotos where id = p_foto;
   if f.id is null then raise exception 'foto_no_existe'; end if;
@@ -308,9 +312,14 @@ begin
   if not public._compite(f.reto_id, v) then raise exception 'no_participas'; end if;
   if p_tipo is null then
     delete from public.votos where foto_id = p_foto and usuario_id = v;
-  elsif p_tipo in ('acepta', 'denuncia') then
-    insert into public.votos (foto_id, reto_id, usuario_id, tipo) values (p_foto, f.reto_id, v, p_tipo)
-    on conflict (foto_id, usuario_id) do update set tipo = excluded.tipo, creado_en = now();
+  elsif p_tipo = 'acepta' then
+    insert into public.votos (foto_id, reto_id, usuario_id, tipo, motivo) values (p_foto, f.reto_id, v, 'acepta', null)
+    on conflict (foto_id, usuario_id) do update set tipo = 'acepta', motivo = null, creado_en = now();
+  elsif p_tipo = 'denuncia' then
+    if m is null then raise exception 'falta_motivo'; end if;
+    if char_length(m) > 200 then raise exception 'motivo_largo'; end if;
+    insert into public.votos (foto_id, reto_id, usuario_id, tipo, motivo) values (p_foto, f.reto_id, v, 'denuncia', m)
+    on conflict (foto_id, usuario_id) do update set tipo = 'denuncia', motivo = excluded.motivo, creado_en = now();
   else
     raise exception 'voto_invalido';
   end if;
@@ -417,7 +426,7 @@ grant execute on function
   public.revisar_retos(),
   public.crear_reto(uuid, text, text, int, int, uuid, boolean, uuid[]),
   public.registrar_foto(uuid, uuid, text),
-  public.votar_foto(uuid, uuid, text),
+  public.votar_foto(uuid, uuid, text, text),
   public.juez_aceptar_foto(uuid, uuid),
   public.juez_eliminar_foto(uuid, uuid),
   public.admin_entrar(text),

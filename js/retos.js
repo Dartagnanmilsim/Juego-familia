@@ -43,6 +43,8 @@
     campeonato_sin_retos: "Elige al menos un reto para el campeonato.",
     campeonato_no_existe: "Ese campeonato ya no existe.",
     nombre_invalido: "Escribe un nombre (máximo 60 caracteres).",
+    falta_motivo: "Escribe o elige el motivo de la denuncia.",
+    motivo_largo: "El motivo puede tener como máximo 200 caracteres.",
     fuera_de_horario: "Ahora no se pueden crear retos: estás fuera del horario permitido.",
     horario_invalido: "La hora de inicio debe ser anterior a la de fin.",
     zona_invalida: "Esa zona horaria no existe."
@@ -424,11 +426,12 @@
     return c;
   }
   function votosDe(fotoId) {
-    var v = { acepta: 0, denuncia: 0, mio: null };
+    var v = { acepta: 0, denuncia: 0, mio: null, miMotivo: "", denuncias: [] };
     data.votos.forEach(function (x) {
       if (x.foto_id !== fotoId) return;
       v[x.tipo]++;
-      if (me && x.usuario_id === me.id) v.mio = x.tipo;
+      if (x.tipo === "denuncia") v.denuncias.push(x);
+      if (me && x.usuario_id === me.id) { v.mio = x.tipo; v.miMotivo = x.motivo || ""; }
     });
     return v;
   }
@@ -631,13 +634,18 @@
         '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">Eliminar</button>';
     } else if (participo && !mia) {
       acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">Válida</button>' +
-        '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">Denunciar</button>';
+        '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">' + (v.mio === "denuncia" ? "Denunciada · cambiar" : "Denunciar") + '</button>';
     }
     return '<li class="photo-item' + (v.denuncia ? " reported" : "") + '">' +
       '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"></button>' +
       '<div class="photo-info"><b>' + esc(u.avatar + " " + u.nombre) + (mia ? " (tú)" : "") + '</b>' +
       '<span class="badge ' + (ok ? "ok" : "pend") + '">' + (ok ? "Aceptada" : "Pendiente") + '</span>' +
       '<small>' + v.acepta + ' a favor · ' + v.denuncia + ' denuncia' + (v.denuncia === 1 ? "" : "s") + ' · ' + fmtDate(f.creado_en) + '</small>' +
+      (v.denuncias.length ? '<ul class="reports">' + v.denuncias.map(function (x) {
+        var q = user(x.usuario_id);
+        return '<li><b>' + esc(q.avatar + " " + q.nombre) + (me && x.usuario_id === me.id ? " (tú)" : "") + ':</b> ' +
+          (x.motivo ? esc(x.motivo) : '<span class="muted">Sin motivo (denuncia anterior)</span>') + '</li>';
+      }).join("") + '</ul>' : "") +
       (acciones ? '<div class="photo-actions">' + acciones + '</div>' : "") + '</div></li>';
   }
 
@@ -801,12 +809,69 @@
         await reload();
       });
     }
-    var v = votosDe(id), tipo = v.mio === act ? null : act;   // tocar otra vez quita la marca
+    var v = votosDe(id);
+    if (act === "denuncia") return openReport(f, v);
+    var tipo = v.mio === act ? null : act;   // tocar otra vez quita la marca
     guard(async function () {
-      must(await db.rpc("votar_foto", { p_token: token, p_foto: id, p_tipo: tipo }));
-      if (tipo === "denuncia") toast("Foto denunciada. El juez la revisará.");
+      must(await db.rpc("votar_foto", { p_token: token, p_foto: id, p_tipo: tipo, p_motivo: null }));
       await reload();
     });
+  }
+
+  // ------------------------------------------------------------ denunciar con motivo
+  var MOTIVOS = ["No es lo que pide el reto", "Foto repetida", "No se ve bien / borrosa", "Es foto de una pantalla o de otra foto"];
+  function openReport(f, v) {
+    var u = user(f.usuario_id), ov = document.createElement("div");
+    // Separa el motivo guardado en "motivo rápido" + comentario (se guarda como "Motivo: comentario")
+    var actual = v.mio === "denuncia" ? v.miMotivo : "", rapido = "", comentario = actual;
+    MOTIVOS.forEach(function (m) {
+      if (actual === m) { rapido = m; comentario = ""; }
+      else if (actual.indexOf(m + ": ") === 0) { rapido = m; comentario = actual.slice(m.length + 2); }
+    });
+    if (actual && !rapido) rapido = "Otro motivo";
+    ov.className = "party report-ov";
+    ov.innerHTML = '<form class="party-box report-box" id="repForm">' +
+      '<img class="report-img" alt="" src="' + esc(photoUrl(f.ruta)) + '">' +
+      '<h2>¿Por qué denuncias esta foto?</h2><p>Foto de ' + esc(u.avatar + " " + u.nombre) + '. El juez verá tu motivo.</p>' +
+      '<div class="chips report-chips" id="repChips">' + MOTIVOS.concat(["Otro motivo"]).map(function (m) {
+        return '<button type="button" class="chip' + (m === rapido ? " on" : "") + '" data-m="' + esc(m) + '">' + esc(m) + '</button>';
+      }).join("") + '</div>' +
+      '<textarea id="repText" maxlength="200" rows="3" placeholder="Explica el motivo (obligatorio si eliges «Otro motivo»)">' +
+      esc(comentario) + '</textarea>' +
+      '<div class="rep-count"><span id="repN">0</span>/200</div>' +
+      '<div class="row report-actions">' +
+      (v.mio === "denuncia" ? '<button type="button" class="btn ghost" id="repQuitar">Quitar denuncia</button>' : '<button type="button" class="btn ghost" id="repCancel">Cancelar</button>') +
+      '<button class="btn danger-solid">Denunciar</button></div></form>';
+    document.body.appendChild(ov);
+    var sel = rapido, txt = ov.querySelector("#repText");
+    function count() { ov.querySelector("#repN").textContent = txt.value.length; }
+    count(); txt.oninput = count;
+    ov.querySelector("#repChips").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      sel = b.dataset.m;
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+      if (sel === "Otro motivo") txt.focus();
+    };
+    function cerrar() { ov.remove(); }
+    ov.onclick = function (e) { if (e.target === ov) cerrar(); };
+    if (ov.querySelector("#repCancel")) ov.querySelector("#repCancel").onclick = cerrar;
+    if (ov.querySelector("#repQuitar")) ov.querySelector("#repQuitar").onclick = function () {
+      guard(async function () {
+        must(await db.rpc("votar_foto", { p_token: token, p_foto: f.id, p_tipo: null, p_motivo: null }));
+        cerrar(); toast("Denuncia quitada"); await reload();
+      });
+    };
+    ov.querySelector("#repForm").onsubmit = function (e) {
+      e.preventDefault();
+      var extra = txt.value.trim();
+      var motivo = sel && sel !== "Otro motivo" ? sel + (extra ? ": " + extra : "") : extra;
+      if (!motivo) { txt.focus(); return toast(sel === "Otro motivo" ? "Escribe cuál es el motivo." : ERRORS.falta_motivo); }
+      if (motivo.length > 200) return toast(ERRORS.motivo_largo);
+      guard(async function () {
+        must(await db.rpc("votar_foto", { p_token: token, p_foto: f.id, p_tipo: "denuncia", p_motivo: motivo }));
+        cerrar(); toast("Foto denunciada. El juez verá tu motivo."); await reload();
+      });
+    };
   }
 
   function invite() {
