@@ -800,7 +800,11 @@
     var u = user(f.usuario_id);
     if (act === "eliminar") {
       if (!confirm("¿Eliminar esta foto de " + u.nombre + "? Dejará de contar y no se puede deshacer.")) return;
-      return guard(async function () { must(await db.rpc("juez_eliminar_foto", { p_token: token, p_foto: id })); toast("Foto eliminada"); await reload(); });
+      return guard(async function () {
+        await servidor({ accion: "eliminar_foto", token: token, foto_id: id },
+          async function () { must(await db.rpc("juez_eliminar_foto", { p_token: token, p_foto: id })); });
+        toast("Foto eliminada"); await reload();
+      });
     }
     if (act === "aceptar") {
       return guard(async function () {
@@ -816,6 +820,26 @@
       must(await db.rpc("votar_foto", { p_token: token, p_foto: id, p_tipo: tipo, p_motivo: null }));
       await reload();
     });
+  }
+
+  // ------------------------------------------------------------ función de servidor "limpiar-fotos"
+  // Borra también los archivos de las fotos. Si la función aún no está instalada en Supabase,
+  // se hace como antes con la base de datos (los archivos se quedan guardados).
+  async function servidor(body, fallback) {
+    var res;
+    try { res = await db.functions.invoke("limpiar-fotos", { body: body }); }
+    catch (e) { res = { error: e }; }
+    if (!res.error) return res.data || {};
+    var info = null;
+    try { if (res.error.context && res.error.context.json) info = await res.error.context.json(); } catch (x) {}
+    if (info && info.error) throw new Error(info.error);
+    if (fallback) { await fallback(); return { sinFuncion: true }; }
+    throw new Error("funcion_no_instalada");
+  }
+  function msgBorrado(base, res) {
+    if (res.sinFuncion) return base + " (sus fotos siguen guardadas: falta instalar la función limpiar-fotos)";
+    var n = res.archivos_borrados || 0;
+    return base + (n ? " y " + n + (n === 1 ? " foto borrada" : " fotos borradas") + " del almacenamiento" : "");
   }
 
   // ------------------------------------------------------------ denunciar con motivo
@@ -953,6 +977,12 @@
       v.srcObject = cam.stream;
       v.classList.toggle("mirror", cam.facing === "user");
       await v.play().catch(function () {});
+      // Esperar a que la imagen tenga tamaño antes de dejar disparar
+      if (!v.videoWidth) await new Promise(function (ok) {
+        var t = setTimeout(ok, 4000);
+        v.addEventListener("loadedmetadata", function () { clearTimeout(t); ok(); }, { once: true });
+      });
+      if (!cam.stream) return;   // se cerró la cámara mientras tanto
       cam.hwApplied = 1; setupZoom();
       camMsg(""); el("camShutter").disabled = false;
     } catch (e) {
@@ -969,6 +999,7 @@
   function openCamera(r) {
     if (busy) return;
     cam.reto = r; cam.shot = null;
+    el("camShutter").disabled = true;   // se activa cuando la cámara está lista
     el("camPreview").hidden = true; el("camLive").hidden = false; el("camera").hidden = false;
     el("camTitle").textContent = r.emoji + " " + r.que_buscar;
     startStream();
@@ -976,10 +1007,11 @@
   function closeCamera() {
     if (cam.stream) cam.stream.getTracks().forEach(function (t) { t.stop(); });
     cam.stream = null; cam.shot = null; el("camVideo").srcObject = null; el("camera").hidden = true;
+    el("camShutter").disabled = true;
   }
   function takePhoto() {
     var v = el("camVideo");
-    if (!v.videoWidth) return;
+    if (!v.videoWidth) return toast("La cámara aún se está preparando. Inténtalo en un segundo.");
     // La foto sale con el zoom de la pantalla: con zoom digital se recorta el centro.
     var d = cam.digital || 1, sw = v.videoWidth / d, sh = v.videoHeight / d;
     var sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
@@ -1217,6 +1249,7 @@
           '<button class="btn small danger" data-act="del-user" data-id="' + u.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : '<p class="hint">Todavía no hay usuarios.</p>') +
       '</section>' +
+      '<section class="card admin" id="almac"><h2>Almacenamiento</h2><p class="hint">Calculando…</p></section>' +
       renderReglasAdmin() +
       renderCampAdmin() +
       '<section class="card admin"><h2>Clave de administrador</h2>' +
@@ -1228,12 +1261,41 @@
     el("admExit").onclick = exitAdmin;
     bindCampAdmin();
     bindReglasAdmin();
+    cargarAlmacenamiento();
     el("admNewForm").onsubmit = function (e) {
       e.preventDefault();
       var nueva = el("admNew").value;
       guard(async function () {
         must(await db.rpc("admin_cambiar_clave", { p_clave: adminClave, p_nueva: nueva }));
         adminClave = nueva; toast("Clave de administrador cambiada"); el("admNewForm").reset();
+      });
+    };
+  }
+
+  function mb(b) { return (b / 1048576).toFixed(1).replace(".", ",") + " MB"; }
+  async function cargarAlmacenamiento() {
+    var box = el("almac"); if (!box) return;
+    var r = await db.rpc("admin_almacenamiento", { p_clave: adminClave });
+    box = el("almac"); if (!box) return;
+    if (r.error) { box.querySelector(".hint").textContent = "No disponible: actualiza la base de datos para ver el almacenamiento."; return; }
+    var a = r.data;
+    box.innerHTML = '<h2>Almacenamiento</h2>' +
+      '<div class="stats"><div><b>' + a.archivos + '</b><small>fotos guardadas</small></div><div><b>' + mb(a.bytes) + '</b><small>ocupado</small></div></div>' +
+      (a.huerfanos
+        ? '<p class="hint"><b>' + a.huerfanos + (a.huerfanos === 1 ? " foto sin usar" : " fotos sin usar") + '</b> (' + mb(a.bytes_huerfanos) +
+          ') de retos, usuarios o fotos ya eliminados.</p><button class="btn wide" id="limpiar">Borrar fotos sin usar</button>'
+        : '<p class="hint">No hay fotos sin usar. Al eliminar retos, usuarios o fotos se borran también sus archivos.</p>');
+    if (el("limpiar")) el("limpiar").onclick = function () {
+      if (!confirm("¿Borrar " + a.huerfanos + " fotos sin usar? No pertenecen a ningún reto y no se pueden recuperar.")) return;
+      guard(async function () {
+        var res;
+        try { res = await servidor({ accion: "limpiar", clave: adminClave }); }
+        catch (e) {
+          if (String(e.message).indexOf("funcion_no_instalada") >= 0) return toast("Falta instalar la función limpiar-fotos en Supabase.", 5000);
+          throw e;
+        }
+        toast((res.archivos_borrados || 0) + " fotos sin usar borradas");
+        cargarAlmacenamiento();
       });
     };
   }
@@ -1358,8 +1420,9 @@
       }
       if (!confirm("¿Eliminar el usuario @" + u.usuario + " (" + u.nombre + ")? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
       return guard(async function () {
-        must(await db.rpc("admin_eliminar_usuario", Object.assign(base, { p_usuario: id })));
-        toast("Usuario eliminado"); await reload();
+        var res = await servidor({ accion: "eliminar_usuario", clave: adminClave, usuario_id: id },
+          async function () { must(await db.rpc("admin_eliminar_usuario", Object.assign(base, { p_usuario: id }))); });
+        toast(msgBorrado("Usuario eliminado", res), 5000); await reload();
       });
     }
     var r = data.retos.filter(function (x) { return x.id === id; })[0];
@@ -1367,8 +1430,9 @@
     var name = r.meta + " · " + r.que_buscar;
     if (!confirm("¿Eliminar el reto «" + name + "»? Se borrarán sus fotos y sus puntos. No se puede deshacer.")) return;
     guard(async function () {
-      must(await db.rpc("admin_eliminar_reto", Object.assign(base, { p_reto: id })));
-      toast("Reto eliminado"); await reload();
+      var res = await servidor({ accion: "eliminar_reto", clave: adminClave, reto_id: id },
+        async function () { must(await db.rpc("admin_eliminar_reto", Object.assign(base, { p_reto: id }))); });
+      toast(msgBorrado("Reto eliminado", res), 5000); await reload();
     });
   }
 

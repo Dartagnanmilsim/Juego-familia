@@ -489,3 +489,9 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .report-actions .btn { width: auto; }
 .btn.danger-solid { background: var(--danger); color: #fff; }
 .photo-item.reported .btn.danger { background: var(--danger); color: #fff; }
+
+/* ---------- Almacenamiento (administrador) ---------- */
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+.stats > div { padding: 12px; border-radius: 12px; background: var(--surface-2); display: grid; gap: 2px; }
+.stats b { font-size: 22px; font-weight: 800; }
+.stats small { color: var(--muted); font-size: 12px; }

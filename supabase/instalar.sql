@@ -410,6 +410,29 @@ begin
   update public.admin_config set hora_inicio = p_inicio, hora_fin = p_fin, zona_horaria = p_zona where id = 1;
   return public.reglas_juego();
 end $$;
+create or replace function public.fotos_huerfanas()
+returns setof text language sql security definer set search_path = public, storage as $$
+  select o.name from storage.objects o
+   where o.bucket_id = 'retos-fotos'
+     and not exists (select 1 from public.fotos f where f.ruta = o.name);
+$$;
+revoke all on function public.fotos_huerfanas() from public, anon, authenticated;
+grant execute on function public.fotos_huerfanas() to service_role;
+create or replace function public.admin_almacenamiento(p_clave text)
+returns json language plpgsql security definer set search_path = public, storage as $$
+declare r json;
+begin
+  perform public._admin_ok(p_clave);
+  select json_build_object(
+    'archivos', count(*),
+    'bytes', coalesce(sum((o.metadata->>'size')::bigint), 0),
+    'huerfanos', count(*) filter (where f.id is null),
+    'bytes_huerfanos', coalesce(sum((o.metadata->>'size')::bigint) filter (where f.id is null), 0))
+  into r
+  from storage.objects o left join public.fotos f on f.ruta = o.name
+  where o.bucket_id = 'retos-fotos';
+  return r;
+end $$;
 create or replace function public.admin_eliminar_campeonato(p_clave text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -437,7 +460,8 @@ grant execute on function
   public.admin_guardar_campeonato(text, uuid, text, uuid[]),
   public.admin_eliminar_campeonato(text, uuid),
   public.reglas_juego(),
-  public.admin_guardar_reglas(text, int, int, text)
+  public.admin_guardar_reglas(text, int, int, text),
+  public.admin_almacenamiento(text)
 to anon, authenticated;
 do $$
 declare t text;

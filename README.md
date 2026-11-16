@@ -23,6 +23,9 @@ Tres módulos (pestañas abajo de la cabecera):
   (zoom real del móvil si lo permite; si no, zoom digital recortando el centro).
 - **Denuncias con motivo:** al denunciar una foto hay que decir por qué (motivos rápidos o texto propio, hasta 200
   caracteres). El juez y los jugadores ven debajo de la foto quién la denunció y por qué.
+- **Almacenamiento:** al eliminar un reto, un usuario o una foto se borran también los archivos de las fotos, con la
+  función de servidor `supabase/functions/limpiar-fotos` (Supabase Edge Function). El panel del administrador muestra
+  cuánto ocupan las fotos y permite borrar las fotos sin usar.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

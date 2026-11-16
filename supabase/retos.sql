@@ -18,6 +18,8 @@
 --    Reglas        -> los retos solo se pueden crear dentro de un horario
 --                     (al principio de 8:00 a 18:00, hora de Colombia). El
 --                     administrador puede cambiar las horas y la zona horaria.
+--    Almacenamiento -> al borrar retos, usuarios o fotos, la función de servidor
+--                     "limpiar-fotos" (supabase/functions) borra también los archivos.
 --    Administrador -> entra con su clave (al principio 1234) y puede eliminar
 --                     usuarios y retos, y restablecer claves.
 --
@@ -513,6 +515,34 @@ begin
   return public.reglas_juego();
 end $$;
 
+-- Archivos de fotos que ya no pertenecen a ninguna foto del juego (retos o usuarios borrados).
+-- Solo la usa la función de servidor "limpiar-fotos" (rol service_role), nunca la app.
+create or replace function public.fotos_huerfanas()
+returns setof text language sql security definer set search_path = public, storage as $$
+  select o.name from storage.objects o
+   where o.bucket_id = 'retos-fotos'
+     and not exists (select 1 from public.fotos f where f.ruta = o.name);
+$$;
+revoke all on function public.fotos_huerfanas() from public, anon, authenticated;
+grant execute on function public.fotos_huerfanas() to service_role;
+
+-- Resumen del espacio que ocupan las fotos (para el panel del administrador).
+create or replace function public.admin_almacenamiento(p_clave text)
+returns json language plpgsql security definer set search_path = public, storage as $$
+declare r json;
+begin
+  perform public._admin_ok(p_clave);
+  select json_build_object(
+    'archivos', count(*),
+    'bytes', coalesce(sum((o.metadata->>'size')::bigint), 0),
+    'huerfanos', count(*) filter (where f.id is null),
+    'bytes_huerfanos', coalesce(sum((o.metadata->>'size')::bigint) filter (where f.id is null), 0))
+  into r
+  from storage.objects o left join public.fotos f on f.ruta = o.name
+  where o.bucket_id = 'retos-fotos';
+  return r;
+end $$;
+
 create or replace function public.admin_eliminar_campeonato(p_clave text, p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -541,7 +571,8 @@ grant execute on function
   public.admin_guardar_campeonato(text, uuid, text, uuid[]),
   public.admin_eliminar_campeonato(text, uuid),
   public.reglas_juego(),
-  public.admin_guardar_reglas(text, int, int, text)
+  public.admin_guardar_reglas(text, int, int, text),
+  public.admin_almacenamiento(text)
 to anon, authenticated;
 
 -- ------------------------------------------------------- tiempo real
