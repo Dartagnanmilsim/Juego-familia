@@ -495,3 +495,48 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .stats > div { padding: 12px; border-radius: 12px; background: var(--surface-2); display: grid; gap: 2px; }
 .stats b { font-size: 22px; font-weight: 800; }
 .stats small { color: var(--muted); font-size: 12px; }
+
+/* ---------- Calabozo 🚔 ---------- */
+/* Avatar detrás de rejas */
+.jailed, .cell-av { position: relative; display: inline-grid; place-items: center; }
+.jailed::after, .cell::after, .jailed-btn::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 4px; pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 3px, rgba(60, 64, 72, 0.9) 3px 5px);
+}
+.jailed { filter: grayscale(0.6); }
+.jail-tag { font-size: 11px; font-weight: 700; color: var(--danger); white-space: nowrap; }
+.jail-small { color: var(--danger) !important; }
+.me.jailed-btn { position: relative; overflow: hidden; }
+.me.jailed-btn::after { border-radius: 50%; }
+
+.cell {
+  position: relative; display: grid; place-items: center; width: 84px; height: 84px; margin: 0 auto 6px;
+  border-radius: 16px; background: var(--surface-2); border: 3px solid #3c4048; overflow: hidden;
+}
+.cell::after { inset: 0; border-radius: 0; background: repeating-linear-gradient(90deg, transparent 0 11px, #3c4048 11px 15px); }
+.cell .cell-av { font-size: 44px; filter: grayscale(0.4); }
+.cell .cuffs { position: absolute; right: 2px; bottom: 0; font-size: 22px; z-index: 1; }
+.cell.big { width: 96px; height: 96px; }
+.cell.mini { width: 44px; height: 44px; border-width: 2px; border-radius: 10px; margin: 0; flex: none; }
+.cell.mini::after { background: repeating-linear-gradient(90deg, transparent 0 6px, #3c4048 6px 8px); }
+.cell.mini .cell-av { font-size: 22px; }
+
+.carcel-card { text-align: center; border: 2px solid #3c4048; background:
+  repeating-linear-gradient(45deg, var(--surface) 0 18px, var(--surface-2) 18px 36px); }
+.carcel-card h2 { display: block; font-size: 20px; }
+.free-in::before { content: "Sales en"; }
+.carcel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.carcel-list li { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+.carcel-info { display: grid; gap: 2px; min-width: 0; font-size: 14px; }
+.carcel-info small { color: var(--muted); font-size: 12px; }
+.carcel-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.btn.wa.small { padding: 6px 10px; font-size: 12px; }
+.btn.wa.small svg { width: 16px; height: 16px; }
+.jail-btn { margin-left: 4px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 14px; line-height: 1.2; }
+.confiscada { display: grid; gap: 2px; justify-items: center; padding: 14px; border-radius: 14px; background: var(--surface-2); border: 2px dashed #3c4048; text-align: center; font-size: 16px; }
+.confiscada small { color: var(--muted); font-size: 13px; }
+.jail-box { text-align: left; }
+.jail-box h2 { text-align: center; }
+.jail-box > p { text-align: center; }
+.jail-box .label { margin: 12px 0 6px; }
+.jail-box #jailText { margin-top: 8px; }

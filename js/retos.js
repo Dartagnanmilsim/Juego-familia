@@ -43,7 +43,10 @@
     campeonato_sin_retos: "Elige al menos un reto para el campeonato.",
     campeonato_no_existe: "Ese campeonato ya no existe.",
     nombre_invalido: "Escribe un nombre (máximo 60 caracteres).",
-    falta_motivo: "Escribe o elige el motivo de la denuncia.",
+    falta_motivo: "Escribe o elige el motivo.",
+    estas_preso: "🚔 Estás en el calabozo: no puedes hacer eso hasta que salgas.",
+    condena_invalida: "Elige una condena válida.",
+    solo_quien_encarcelo: "Solo puede liberarlo quien lo encarceló o el administrador.",
     motivo_largo: "El motivo puede tener como máximo 200 caracteres.",
     fuera_de_horario: "Ahora no se pueden crear retos: estás fuera del horario permitido.",
     horario_invalido: "La hora de inicio debe ser anterior a la de fin.",
@@ -150,7 +153,7 @@
     el("barSub").hidden = !logged;
     el("barSub").textContent = logged ? "@" + me.usuario : "";
     el("meBtn").hidden = !logged;
-    if (logged) el("meBtn").textContent = me.avatar;
+    if (logged) { el("meBtn").textContent = me.avatar; el("meBtn").classList.toggle("jailed-btn", !!(data && presoDe(me.id))); }
     el("tabs").hidden = !(logged && inApp);
     [].forEach.call(document.querySelectorAll("#tabs [data-tab]"), function (b) {
       var t = b.dataset.tab;
@@ -271,7 +274,7 @@
     $app.innerHTML =
       '<section class="card"><h2>Jugadores (' + data.usuarios.length + ')</h2>' +
       '<ul class="admin-list">' + data.usuarios.map(function (u) {
-        return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><div class="admin-info"><b>' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (tú)" : "") + '</b>' +
+        return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><div class="admin-info"><b>' + avh(u) + " " + esc(u.nombre) + (u.id === me.id ? " (tú)" : "") + (presoDe(u.id) ? ' <span class="jail-tag">⛓️ preso</span>' : "") + '</b>' +
           '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts" + (wins[u.id] ? " · " + wins[u.id] + (wins[u.id] === 1 ? " victoria" : " victorias") : "") + '</small></div></li>';
       }).join("") + '</ul>' +
       (nu
@@ -348,10 +351,12 @@
         db.from("puntajes").select("*"),
         db.from("participantes").select("*"),
         db.from("campeonatos").select("*").order("creado_en", { ascending: false }),
-        db.from("campeonato_retos").select("*")
+        db.from("campeonato_retos").select("*"),
+        db.from("presos").select("*").order("desde", { ascending: false }).limit(300)
       ]);
       var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), participantes: must(r[3]),
-        campeonatos: must(r[4]), campeonatoRetos: must(r[5]), fotos: [], votos: [], reglas: null };
+        campeonatos: must(r[4]), campeonatoRetos: must(r[5]),
+        presos: r[6].error ? [] : r[6].data, fotos: [], votos: [], reglas: null };
       try { var rg = await db.rpc("reglas_juego"); if (!rg.error) next.reglas = rg.data; } catch (e) {}
       var ids = next.retos.filter(function (x) { return x.estado === "activo" || x.id === sel; }).map(function (x) { return x.id; });
       var fv = await Promise.all(ids.map(function (id) {
@@ -386,7 +391,7 @@
   function startLive() {
     stopLive();
     channel = db.channel("retos-en-familia");
-    ["usuarios", "retos", "fotos", "puntajes", "votos", "participantes", "campeonatos", "campeonato_retos"].forEach(function (t) {
+    ["usuarios", "retos", "fotos", "puntajes", "votos", "participantes", "campeonatos", "campeonato_retos", "presos"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     });
     channel.subscribe();
@@ -410,6 +415,11 @@
       var left = new Date(r.termina_en) - Date.now();
       c.textContent = fmtLeft(left);
       c.classList.toggle("hurry", left < 5 * 60000);
+      if (left <= 0) vencido = true;
+    });
+    $app.querySelectorAll("[data-preso]").forEach(function (c) {
+      var left = new Date(c.dataset.preso) - Date.now();
+      c.textContent = left > 0 ? fmtLeft(left) : "¡libre!";
       if (left <= 0) vencido = true;
     });
     if (vencido && !updateClock.asked) { updateClock.asked = true; setTimeout(function () { updateClock.asked = false; reload(); }, 1500); }
@@ -531,8 +541,8 @@
       var pa = (juezDe(a) === me.id || compite(a, me.id)) ? 0 : 1, pb = (juezDe(b) === me.id || compite(b, me.id)) ? 0 : 1;
       return pa - pb || new Date(a.termina_en) - new Date(b.termina_en);
     });
-    var hz = horario();
-    return (hz.abierto
+    var hz = horario(), yoPreso = presoDe(me.id);
+    return carcelBanner() + (yoPreso ? "" : hz.abierto
         ? '<button class="btn primary wide new-reto" id="newReto">+ Crear reto</button>'
         : '<div class="card closed-box"><b>Fuera del horario para crear retos</b>Los retos se crean de <b>' + hz.rango + '</b> (hora de ' + esc(hz.zona) + '). ' +
           'Ahora son las ' + hz.ahora + '. Los retos en marcha siguen igual.</div>') +
@@ -550,7 +560,7 @@
           (juezDe(r) === me.id && pend ? '<small class="to-review">' + pend + ' foto' + (pend === 1 ? "" : "s") + ' por revisar</small>' : "") +
           '</span><span class="reto-go">›</span></button></li>';
       }).join("") + '</ul>' : '<p class="hint">No hay retos en marcha.' + (hz.abierto ? ' ¡Crea uno!' : '') + '</p>') +
-      '</section>';
+      '</section>' + renderCalabozo();
   }
 
   function renderActive(r) {
@@ -567,6 +577,9 @@
     if (soyJuez) {
       accion = '<div class="judge-box"><b>Eres el juez de este reto</b>No compites. Acepta las fotos que valen y elimina las que no. ' +
         'Solo cuentan las que aceptes.<div class="judge-count">' + pendientes + ' foto' + (pendientes === 1 ? "" : "s") + ' por revisar</div></div>';
+    } else if (participo && presoDe(me.id)) {
+      accion = '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas</small></div>' +
+        '<div class="confiscada">📷🔒 <b>Cámara confiscada</b><small>Estás en el calabozo. Podrás volver a hacer fotos en <span data-preso="' + presoDe(me.id).hasta + '"></span>.</small></div>';
     } else if (participo) {
       accion = '<div class="mine"><b>' + mine.ok + '</b> / ' + r.meta + '<small>tus fotos aceptadas' + (mine.pend ? " · " + mine.pend + " esperando al juez" : "") + '</small></div>' +
         '<button class="btn camera' + (busy ? " busy" : "") + '" id="shot">' + (busy ? "Subiendo…" : "Tomar foto") + '</button>' +
@@ -579,7 +592,7 @@
         'Se abrirá WhatsApp con el mensaje escrito: elige el grupo o la persona y envíalo.</p>' +
         waButton(textoReto(r, true), "Avisar por WhatsApp", "wide") + '</section>'
       : "";
-    return aviso + '<section class="card active">' +
+    return aviso + (presoDe(me.id) ? carcelBanner() : "") + '<section class="card active">' +
       '<div class="tag live">En marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
@@ -590,9 +603,10 @@
       '<ul class="race">' + lista.map(function (u) {
         var x = c[u.id] || { ok: 0, pend: 0 }, pct = Math.min(100, Math.round(x.ok / r.meta * 100));
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '>' +
-          '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
+          '<span class="who">' + avh(u) + " " + esc(u.nombre) + (presoDe(u.id) ? ' <span class="jail-tag">⛓️ preso</span>' : "") + '</span>' +
           '<span class="track"><i style="width:' + pct + '%"></i></span>' +
-          '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + ' pend.</small>' : "") + '</span></li>';
+          '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + ' pend.</small>' : "") +
+          (soyJuez && !presoDe(u.id) ? ' <button class="jail-btn" data-jail="' + u.id + '" title="Mandar al calabozo" aria-label="Mandar al calabozo a ' + esc(u.nombre) + '">🚔</button>' : "") + '</span></li>';
       }).join("") + '</ul>' +
       '</section>' +
       (justCreated === r.id ? "" : '<div class="wa-row">' + waButton(textoReto(r, false), "Recordar por WhatsApp", "ghost-wa") + '</div>') +
@@ -632,13 +646,13 @@
     if (soyJuez) {
       acciones = (ok ? "" : '<button class="btn small" data-act="aceptar" data-id="' + f.id + '">Aceptar</button>') +
         '<button class="btn small danger" data-act="eliminar" data-id="' + f.id + '">Eliminar</button>';
-    } else if (participo && !mia) {
+    } else if (participo && !mia && !presoDe(me.id)) {
       acciones = '<button class="btn small vote' + (v.mio === "acepta" ? " on" : "") + '" data-act="acepta" data-id="' + f.id + '">Válida</button>' +
         '<button class="btn small vote report' + (v.mio === "denuncia" ? " on" : "") + '" data-act="denuncia" data-id="' + f.id + '">' + (v.mio === "denuncia" ? "Denunciada · cambiar" : "Denunciar") + '</button>';
     }
     return '<li class="photo-item' + (v.denuncia ? " reported" : "") + '">' +
       '<button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"></button>' +
-      '<div class="photo-info"><b>' + esc(u.avatar + " " + u.nombre) + (mia ? " (tú)" : "") + '</b>' +
+      '<div class="photo-info"><b>' + avh(u) + " " + esc(u.nombre) + (mia ? " (tú)" : "") + '</b>' +
       '<span class="badge ' + (ok ? "ok" : "pend") + '">' + (ok ? "Aceptada" : "Pendiente") + '</span>' +
       '<small>' + v.acepta + ' a favor · ' + v.denuncia + ' denuncia' + (v.denuncia === 1 ? "" : "s") + ' · ' + fmtDate(f.creado_en) + '</small>' +
       (v.denuncias.length ? '<ul class="reports">' + v.denuncias.map(function (x) {
@@ -702,7 +716,7 @@
       '<h2>Clasificación</h2>' +
       '<ol class="ranking">' + rows.map(function (u, i) {
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><span class="pos">' + (medals[i] || i + 1) + '</span>' +
-          '<span class="who">' + esc(u.avatar) + " " + esc(u.nombre) + '</span>' +
+          '<span class="who">' + avh(u) + " " + esc(u.nombre) + (presoDe(u.id) ? ' <span class="jail-tag">⛓️ preso</span>' : "") + '</span>' +
           '<span class="wins">' + (wins[u.id] ? wins[u.id] + (wins[u.id] === 1 ? " victoria" : " victorias") : "") + '</span>' +
           '<span class="pts">' + (pts[u.id] || 0) + ' pts</span></li>';
       }).join("") + '</ol>' +
@@ -726,6 +740,7 @@
 
   function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
+    bindCalabozo(r);
     $app.querySelectorAll("[data-open]").forEach(function (b) { b.onclick = function () { openReto(b.dataset.open); }; });
     if (el("backList")) el("backList").onclick = backToList;
     if (el("newReto")) el("newReto").onclick = function () { creating = true; sel = null; render(); window.scrollTo(0, 0); };
@@ -820,6 +835,124 @@
       must(await db.rpc("votar_foto", { p_token: token, p_foto: id, p_tipo: tipo, p_motivo: null }));
       await reload();
     });
+  }
+
+  // ------------------------------------------------------------ calabozo 🚔
+  var FRASES = [
+    "Te toca pan y agua hasta que salgas.", "Puedes mirar, pero no tocar.", "Aprovecha para pensar en lo que hiciste.",
+    "Tu cámara está en el depósito de pruebas.", "Las rejas son de mentira, pero la condena es de verdad.",
+    "El abogado de oficio está de vacaciones.", "Buena conducta = menos tiempo (o no).", "Tranquilo: aquí dentro hay wifi."
+  ];
+  var CONDENAS = [[1, "1 hora"], [3, "3 horas"], [6, "6 horas"], [12, "12 horas"], [24, "1 día"], [72, "3 días"], [168, "1 semana"]];
+  var CONDENAS_ADMIN = CONDENAS.concat([[336, "2 semanas"], [720, "30 días"]]);
+  var DELITOS = ["Fotos falsas o tramposas", "Discutir con el juez", "Denuncias de mala fe", "Hacer trampa"];
+
+  function presoDe(uid) {
+    var now = Date.now();
+    return ((data && data.presos) || []).filter(function (p) {
+      return p.usuario_id === uid && !p.liberado_en && new Date(p.hasta) > now;
+    })[0] || null;
+  }
+  function presosActivos() {
+    var now = Date.now();
+    return ((data && data.presos) || []).filter(function (p) { return !p.liberado_en && new Date(p.hasta) > now; });
+  }
+  // Avatar detrás de rejas si está preso
+  function avh(u) { return u && u.id && presoDe(u.id) ? '<span class="jailed" title="En el calabozo">' + esc(u.avatar) + '</span>' : esc(u && u.avatar); }
+  function frase(p) { var h = 0; for (var i = 0; i < p.id.length; i++) h = (h * 31 + p.id.charCodeAt(i)) >>> 0; return FRASES[h % FRASES.length]; }
+  function quienEncarcelo(p) { return p.por_juez ? "el juez " + user(p.por_juez).nombre : "el administrador"; }
+  function textoCarcel(p) {
+    var u = user(p.usuario_id);
+    return "🚔 *¡" + u.nombre + " va al calabozo!* ⛓️\n\nDelito: " + p.motivo + "\nCondena hasta: " +
+      new Date(p.hasta).toLocaleString("es", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) +
+      "\nLo encarceló " + quienEncarcelo(p) + ".\n\nNo podrá hacer fotos ni crear retos hasta que salga 😅\n" + location.origin + location.pathname;
+  }
+
+  // Mi propia condena (si estoy preso)
+  function carcelBanner() {
+    var p = presoDe(me.id); if (!p) return "";
+    return '<section class="card carcel-card"><div class="cell"><span class="cell-av">' + esc(me.avatar) + '</span><span class="cuffs">⛓️</span></div>' +
+      '<h2>🚨 ¡Estás en el calabozo!</h2>' +
+      '<p class="sub">Delito: <b>' + esc(p.motivo) + '</b><br>Te encarceló ' + esc(quienEncarcelo(p)) + '.</p>' +
+      '<div class="clock-wrap free-in"><span data-preso="' + p.hasta + '"></span></div>' +
+      '<p class="hint">«' + esc(frase(p)) + '» Mientras tanto no puedes hacer fotos, marcarlas, denunciar ni crear retos. Sí puedes mirar.</p></section>';
+  }
+
+  // Lista de presos (pestaña Retos)
+  function renderCalabozo() {
+    var ps = presosActivos(); if (!ps.length) return "";
+    return '<section class="card"><h2>🚔 Calabozo <span class="count">' + ps.length + '</span></h2><ul class="carcel-list">' +
+      ps.map(function (p) {
+        var u = user(p.usuario_id), puedo = p.por_juez && p.por_juez === me.id;
+        return '<li><span class="cell mini"><span class="cell-av">' + esc(u.avatar) + '</span></span>' +
+          '<div class="carcel-info"><b>' + esc(u.nombre) + (u.id === me.id ? " (tú)" : "") + '</b>' +
+          '<small>' + esc(p.motivo) + '</small><small>Sale en <b data-preso="' + p.hasta + '"></b> · lo encarceló ' + esc(quienEncarcelo(p)) + '</small>' +
+          '<div class="carcel-actions">' + waButton(textoCarcel(p), "Contarlo", "small ghost-wa") +
+          (puedo ? '<button class="btn small" data-free="' + p.id + '">Liberar</button>' : "") + '</div></div></li>';
+      }).join("") + '</ul></section>';
+  }
+
+  function bindCalabozo(r) {
+    $app.querySelectorAll("[data-jail]").forEach(function (b) { b.onclick = function () { openJail({ modo: "juez", reto: r, usuario: b.dataset.jail }); }; });
+    $app.querySelectorAll("[data-free]").forEach(function (b) { b.onclick = function () { liberar(b.dataset.free, false); }; });
+  }
+
+  function liberar(presoId, comoAdmin) {
+    var p = (data.presos || []).filter(function (x) { return x.id === presoId; })[0]; if (!p) return;
+    if (!confirm("¿Dar la libertad a " + user(p.usuario_id).nombre + " antes de tiempo?")) return;
+    guard(async function () {
+      if (comoAdmin) must(await db.rpc("admin_liberar", { p_clave: adminClave, p_preso: presoId }));
+      else must(await db.rpc("juez_liberar", { p_token: token, p_preso: presoId }));
+      toast("🔓 " + user(p.usuario_id).nombre + " está libre"); await reload();
+    });
+  }
+
+  // Ventana para mandar al calabozo (juez o administrador)
+  function openJail(o) {
+    var u = user(o.usuario), opciones = o.modo === "admin" ? CONDENAS_ADMIN : CONDENAS, horas = 3, delito = "";
+    var ov = document.createElement("div");
+    ov.className = "party report-ov";
+    ov.innerHTML = '<form class="party-box report-box jail-box" id="jailForm">' +
+      '<div class="cell big"><span class="cell-av">' + esc(u.avatar) + '</span><span class="cuffs">⛓️</span></div>' +
+      '<h2>Mandar al calabozo a ' + esc(u.nombre) + '</h2><p>No podrá hacer fotos, marcarlas, denunciar ni crear retos hasta que cumpla la condena.</p>' +
+      '<p class="label">Condena</p><div class="chips" id="jailTime">' + opciones.map(function (c) {
+        return '<button type="button" class="chip' + (c[0] === horas ? " on" : "") + '" data-h="' + c[0] + '">' + c[1] + '</button>';
+      }).join("") + '</div>' +
+      '<p class="label">Delito <span class="muted">(obligatorio)</span></p><div class="chips" id="jailWhy">' + DELITOS.map(function (d) {
+        return '<button type="button" class="chip" data-d="' + esc(d) + '">' + esc(d) + '</button>';
+      }).join("") + '</div>' +
+      '<textarea id="jailText" maxlength="200" rows="2" placeholder="Ej: dijo que un gato era un perro negro"></textarea>' +
+      '<div class="row report-actions"><button type="button" class="btn ghost" id="jailCancel">Cancelar</button>' +
+      '<button class="btn danger-solid">🔒 Encerrar</button></div></form>';
+    document.body.appendChild(ov);
+    var txt = ov.querySelector("#jailText");
+    function cerrar() { ov.remove(); }
+    ov.onclick = function (e) { if (e.target === ov) cerrar(); };
+    ov.querySelector("#jailCancel").onclick = cerrar;
+    ov.querySelector("#jailTime").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return; horas = +b.dataset.h;
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
+    };
+    ov.querySelector("#jailWhy").onclick = function (e) {
+      var b = e.target.closest(".chip"); if (!b) return; delito = b.classList.contains("on") ? "" : b.dataset.d;
+      [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b && !!delito); });
+    };
+    ov.querySelector("#jailForm").onsubmit = function (e) {
+      e.preventDefault();
+      var extra = txt.value.trim(), motivo = delito ? delito + (extra ? ": " + extra : "") : extra;
+      if (!motivo) { txt.focus(); return toast("Escribe o elige el delito."); }
+      if (motivo.length > 200) return toast("El delito puede tener como máximo 200 caracteres.");
+      guard(async function () {
+        var p = o.modo === "admin"
+          ? must(await db.rpc("admin_encarcelar", { p_clave: adminClave, p_usuario: o.usuario, p_horas: horas, p_motivo: motivo }))
+          : must(await db.rpc("juez_encarcelar", { p_token: token, p_reto: o.reto.id, p_usuario: o.usuario, p_horas: horas, p_motivo: motivo }));
+        await reload();
+        ov.querySelector("#jailForm").innerHTML = '<div class="cell big"><span class="cell-av">' + esc(u.avatar) + '</span><span class="cuffs">⛓️</span></div>' +
+          '<h2>¡' + esc(u.nombre) + ' está en el calabozo!</h2><p>Sale en ' + fmtLeft(new Date(p.hasta) - Date.now()) + '. ¿Lo cuentas en el grupo?</p>' +
+          waButton(textoCarcel(p), "Contarlo por WhatsApp", "wide") + '<button type="button" class="btn ghost wide" id="jailOk">Cerrar</button>';
+        ov.querySelector("#jailOk").onclick = cerrar;
+      });
+    };
   }
 
   // ------------------------------------------------------------ función de servidor "limpiar-fotos"
@@ -1242,9 +1375,13 @@
       '<section class="card admin"><h2>Usuarios (' + data.usuarios.length + ')</h2>' +
       '<p class="hint">Eliminar un usuario borra también sus fotos y sus puntos.</p>' +
       (data.usuarios.length ? '<ul class="admin-list">' + data.usuarios.map(function (u) {
-        return '<li><div class="admin-info"><b>' + esc(u.avatar + " " + u.nombre) + '</b>' +
-          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts · desde " + fmtDate(u.creado_en) + '</small></div>' +
+        var pz = presoDe(u.id);
+        return '<li><div class="admin-info"><b>' + avh(u) + " " + esc(u.nombre) + '</b>' +
+          '<small>@' + esc(u.usuario) + " · " + (pts[u.id] || 0) + " pts · desde " + fmtDate(u.creado_en) + '</small>' +
+          (pz ? '<small class="jail-small">⛓️ Preso: ' + esc(pz.motivo) + ' · sale en <span data-preso="' + pz.hasta + '"></span></small>' : "") + '</div>' +
           '<div class="admin-actions">' +
+          (pz ? '<button class="btn small" data-act="free" data-id="' + pz.id + '">Liberar</button>'
+              : '<button class="btn small" data-act="jail" data-id="' + u.id + '">🚔</button>') +
           '<button class="btn small" data-act="reset" data-id="' + u.id + '">Clave</button>' +
           '<button class="btn small danger" data-act="del-user" data-id="' + u.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : '<p class="hint">Todavía no hay usuarios.</p>') +
@@ -1408,6 +1545,8 @@
 
   function adminAction(act, id) {
     var base = { p_clave: adminClave };
+    if (act === "jail") return openJail({ modo: "admin", usuario: id });
+    if (act === "free") return liberar(id, true);
     if (act === "del-user" || act === "reset") {
       var u = user(id);
       if (act === "reset") {
