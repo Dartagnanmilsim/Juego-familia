@@ -20,6 +20,8 @@ Tres módulos (pestañas abajo de la cabecera):
   proponer otro; 4) **podio por torneo** con la suma de puntos de sus retos.
   Cada torneo tiene **fecha de inicio y de fin** (los retos aprobados solo se programan dentro de esas fechas) y
   **premio para el campeón**, con premios opcionales para el 2.º y el 3.º. Al terminar se muestra el campeón y su premio.
+  **Desempate** si hay los mismos puntos: 1) más fotos aceptadas; 2) menos denuncias recibidas (cuentan aunque el juez
+  haya borrado la foto denunciada; si quien denunció cambia a 👍, deja de contar).
 - **⏰ Regla de horario:** los retos solo se pueden crear de 8:00 a 18:00 (hora de Colombia al principio). Fuera de ese
   horario el botón «Crear reto» se bloquea y la base de datos también lo impide. Los retos en marcha no se ven afectados.
   El administrador puede cambiar las horas y la zona horaria en «Reglas».

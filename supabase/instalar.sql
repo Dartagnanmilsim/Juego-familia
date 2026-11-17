@@ -142,11 +142,27 @@ create table if not exists public.puntajes (
   puntos     int  not null,
   primary key (reto_id, usuario_id)
 );
+create table if not exists public.denuncias (
+  foto_id     uuid not null,
+  reto_id     uuid not null references public.retos(id) on delete cascade,
+  usuario_id  uuid not null references public.usuarios(id) on delete cascade,
+  denunciante uuid not null references public.usuarios(id) on delete cascade,
+  creado_en   timestamptz not null default now(),
+  primary key (foto_id, denunciante)
+);
+create index if not exists denuncias_reto_idx on public.denuncias(reto_id, usuario_id);
+alter table public.puntajes add column if not exists denuncias int not null default 0;
+insert into public.denuncias (foto_id, reto_id, usuario_id, denunciante)
+select v.foto_id, v.reto_id, f.usuario_id, v.usuario_id from public.votos v join public.fotos f on f.id = v.foto_id
+ where v.tipo = 'denuncia'
+on conflict do nothing;
+update public.puntajes p set denuncias = (select count(*) from public.denuncias d where d.reto_id = p.reto_id and d.usuario_id = p.usuario_id);
 insert into public.admin_config (id, clave_hash) values (1, crypt('1234', gen_salt('bf')))
 on conflict (id) do nothing;
 alter table public.usuarios     enable row level security;
 alter table public.credenciales enable row level security;
 alter table public.sesiones     enable row level security;
+alter table public.denuncias    enable row level security;
 alter table public.admin_config enable row level security;
 alter table public.retos        enable row level security;
 alter table public.fotos        enable row level security;
@@ -192,7 +208,7 @@ grant select on public.usuarios, public.retos, public.fotos, public.puntajes, pu
 revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes,
   public.campeonatos, public.campeonato_retos, public.presos, public.votos_presos,
   public.torneos, public.torneo_participantes, public.votos_retos from anon, authenticated;
-revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
+revoke all on public.credenciales, public.sesiones, public.admin_config, public.denuncias from anon, authenticated;
 create or replace function public._usuario_de(p_token uuid)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare v uuid;
@@ -220,8 +236,9 @@ begin
     update public.retos set estado = 'cancelado', motivo = 'cancelado', cerrado_en = now() where id = p_reto;
     return;
   end if;
-  insert into public.puntajes (reto_id, usuario_id, puesto, fotos, puntos)
-  select p_reto, usuario_id, puesto, n, case puesto when 1 then 3 when 2 then 2 when 3 then 1 else 0 end
+  insert into public.puntajes (reto_id, usuario_id, puesto, fotos, puntos, denuncias)
+  select p_reto, usuario_id, puesto, n, case puesto when 1 then 3 when 2 then 2 when 3 then 1 else 0 end,
+         (select count(*) from public.denuncias d where d.reto_id = p_reto and d.usuario_id = t.usuario_id)
     from (
       select usuario_id, count(*)::int as n,
              row_number() over (order by (usuario_id = p_ganador) desc, count(*) desc, max(creado_en) asc)::int as puesto
@@ -393,6 +410,10 @@ begin
   if f.usuario_id = v then raise exception 'no_puedes_votar_tu_foto'; end if;
   if not public._compite(f.reto_id, v) then raise exception 'no_participas'; end if;
   if public._esta_preso(v, f.reto_id) then raise exception 'estas_preso'; end if;
+  delete from public.denuncias where foto_id = p_foto and denunciante = v;
+  if p_tipo = 'denuncia' then
+    insert into public.denuncias (foto_id, reto_id, usuario_id, denunciante) values (p_foto, f.reto_id, f.usuario_id, v);
+  end if;
   if p_tipo is null then
     delete from public.votos where foto_id = p_foto and usuario_id = v;
   elsif p_tipo = 'acepta' then

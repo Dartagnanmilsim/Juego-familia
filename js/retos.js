@@ -1426,22 +1426,22 @@
       ' tu voto</b> en los torneos ›</button>';
   }
 
-  // Suma los puntos de los retos del torneo. Desempate: más retos ganados, luego más fotos aceptadas.
+  // Suma los puntos de los retos del torneo. Desempate: 1) más fotos aceptadas, 2) menos denuncias.
   function tabla(retos) {
     var ids = retos.map(function (r) { return r.id; }), filas = {};
     data.puntajes.forEach(function (p) {
       if (ids.indexOf(p.reto_id) < 0) return;
-      var f = filas[p.usuario_id] || (filas[p.usuario_id] = { id: p.usuario_id, pts: 0, wins: 0, fotos: 0, por: {} });
-      f.pts += p.puntos; f.fotos += p.fotos; if (p.puesto === 1) f.wins++;
+      var f = filas[p.usuario_id] || (filas[p.usuario_id] = { id: p.usuario_id, pts: 0, fotos: 0, den: 0, por: {} });
+      f.pts += p.puntos; f.fotos += p.fotos; f.den += p.denuncias || 0;
       f.por[p.reto_id] = p.puntos;
     });
     var lista = Object.keys(filas).map(function (k) { return filas[k]; })
       .filter(function (f) { return data.usuarios.some(function (u) { return u.id === f.id; }); })
-      .sort(function (a, b) { return b.pts - a.pts || b.wins - a.wins || b.fotos - a.fotos; });
+      .sort(function (a, b) { return b.pts - a.pts || b.fotos - a.fotos || a.den - b.den; });
     var puesto = 0;
     lista.forEach(function (f, i) {
       var prev = lista[i - 1];
-      if (!prev || prev.pts !== f.pts || prev.wins !== f.wins || prev.fotos !== f.fotos) puesto = i + 1;
+      if (!prev || prev.pts !== f.pts || prev.fotos !== f.fotos || prev.den !== f.den) puesto = i + 1;
       f.puesto = puesto;
     });
     return { filas: lista, lideres: lista.filter(function (f) { return f.puesto === 1; }) };
@@ -1461,7 +1461,8 @@
       "1️⃣ Cada participante propone *1 solo reto* en el torneo.\n" +
       "2️⃣ Solo empieza *1 reto por día*, entre la fecha de inicio y la de fin. Si un día ya tiene reto, el siguiente aprobado empieza otro día.\n" +
       "3️⃣ Un reto propuesto necesita *" + VOTOS_TORNEO + " votos a favor* de otros participantes para empezar. Si en *24 horas* no los consigue, se elimina y quien lo propuso puede proponer otro.\n" +
-      "4️⃣ Cada reto da 3, 2 y 1 puntos a los tres primeros (solo cuentan fotos aceptadas por el juez). El *podio del torneo* suma los puntos de sus retos.\n\n" +
+      "4️⃣ Cada reto da 3, 2 y 1 puntos a los tres primeros (solo cuentan fotos aceptadas por el juez). El *podio del torneo* suma los puntos de sus retos.\n" +
+      "⚖️ *Desempate* (si hay los mismos puntos): 1) más fotos aceptadas; 2) menos denuncias recibidas.\n\n" +
       "👥 Participantes (" + ps.length + "): " + ps.join(", ") + "\n\n¡A jugar! 👇\n" + location.origin + location.pathname;
   }
   function textoPodio(t, tb) {
@@ -1528,7 +1529,8 @@
         '<li>Cada participante propone <b>1 solo reto</b> en el torneo.</li>' +
         '<li>Solo empieza <b>1 reto por día</b>' + (t.inicia_el ? ', entre el ' + fmtDia(t.inicia_el) + ' y el ' + fmtDia(t.termina_el) : "") + '. Si un día ya tiene reto, el siguiente aprobado empieza otro día a la hora de inicio.</li>' +
         '<li>Un reto propuesto necesita <b>' + VOTOS_TORNEO + ' votos a favor</b> de otros participantes para empezar. Si en <b>24 horas</b> no los consigue, se elimina y quien lo propuso puede proponer otro.</li>' +
-        '<li>Cada reto da 3, 2 y 1 puntos a los tres primeros. El <b>podio del torneo</b> suma los puntos de sus retos.</li></ol>' +
+        '<li>Cada reto da 3, 2 y 1 puntos a los tres primeros. El <b>podio del torneo</b> suma los puntos de sus retos.</li>' +
+        '<li><b>Desempate</b> si hay los mismos puntos: 1) más fotos aceptadas; 2) menos denuncias recibidas.</li></ol>' +
         (parts.length < VOTOS_TORNEO + 1 ? '<p class="hint">⚠️ Con ' + parts.length + ' participantes ningún reto puede llegar a ' + VOTOS_TORNEO + ' votos: hacen falta al menos ' + (VOTOS_TORNEO + 1) + '.</p>' : "") +
         '</details>' +
       waButton(textoReglas(t), "Compartir reglas por WhatsApp", "small ghost-wa") +
@@ -1554,12 +1556,12 @@
       '<h3>Podio</h3>' + podium +
       (tb.filas.length ? '<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th>' +
         jugados.map(function (r, i) { return '<th title="' + esc(r.que_buscar) + '">R' + (i + 1) + '</th>'; }).join("") +
-        '<th>Total</th></tr></thead><tbody>' + tb.filas.map(function (f) {
+        '<th>Total</th><th title="Fotos aceptadas (1.er desempate)">📷</th><th title="Denuncias recibidas (2.º desempate)">🚩</th></tr></thead><tbody>' + tb.filas.map(function (f) {
           var u = user(f.id);
           return '<tr' + (me && f.id === me.id ? ' class="is-me"' : "") + '><td>' + f.puesto + '</td><td class="pl">' + esc(u.avatar + " " + u.nombre) + '</td>' +
             jugados.map(function (r) { return '<td>' + (r.id in f.por ? f.por[r.id] : (r.estado === "activo" ? "·" : "–")) + '</td>'; }).join("") +
-            '<td class="tot">' + f.pts + '</td></tr>';
-        }).join("") + '</tbody></table></div>' : "") +
+            '<td class="tot">' + f.pts + '</td><td>' + f.fotos + '</td><td>' + f.den + '</td></tr>';
+        }).join("") + '</tbody></table></div><p class="hint">📷 fotos aceptadas · 🚩 denuncias recibidas. Con los mismos puntos gana quien tenga más 📷 y, si siguen igual, menos 🚩.</p>' : "") +
       (jugados.length ? '<ul class="camp-retos">' + jugados.map(function (r, i) {
         var w = r.ganador_id ? user(r.ganador_id) : null;
         return '<li><button class="hist-item" data-reto="' + r.id + '"><span><b>R' + (i + 1) + '</b> ' + esc(r.emoji + " " + r.que_buscar) +
