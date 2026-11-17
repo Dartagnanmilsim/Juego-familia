@@ -573,3 +573,15 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .propuestas .btn.small { justify-self: start; }
 .torneo-tag { color: var(--accent) !important; font-weight: 700; }
 .aviso-torneo { width: 100%; text-align: left; cursor: pointer; background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); font-size: 14px; }
+
+.torneo-fechas { margin: 2px 0 8px; font-weight: 600; font-size: 14px; }
+.premios { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 6px; }
+.premios li { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.premios li > span:first-child { font-size: 22px; }
+.premios li > span:last-child { display: grid; min-width: 0; }
+.premios small { color: var(--muted); font-size: 12px; }
+.campeon { margin: 4px 0 12px; padding: 12px; border-radius: 12px; background: var(--accent-soft); font-size: 15px; }
+.step-prize { font-size: 11px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+.row.fechas { gap: 10px; }
+.row.fechas label { flex: 1; display: grid; gap: 4px; min-width: 0; }
+.row.fechas input { width: 100%; min-width: 0; }

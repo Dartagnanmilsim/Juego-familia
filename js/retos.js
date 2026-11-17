@@ -53,6 +53,10 @@
     votacion_cerrada: "La votación ya está cerrada.",
     no_puedes_votarte: "No puedes votar en tu propia votación.",
     pocos_participantes: "Elige al menos 2 participantes.",
+    fechas_invalidas: "Revisa las fechas: el fin no puede ser antes del inicio.",
+    premio_invalido: "Escribe el premio del campeón (hasta 100 caracteres).",
+    torneo_terminado: "Este torneo ya terminó.",
+    torneo_sin_dias: "Ya no quedan días libres en el torneo para este reto (1 reto por día hasta la fecha de fin).",
     torneo_no_existe: "Ese torneo ya no existe.",
     no_eres_del_torneo: "No eres participante de este torneo.",
     juez_no_es_del_torneo: "El juez tiene que ser participante del torneo.",
@@ -1379,6 +1383,28 @@
 
   // ============================================================ TORNEOS
   var VOTOS_TORNEO = 5;
+  // Fechas del torneo (AAAA-MM-DD) en la zona horaria del juego
+  function hoyISO() {
+    var z = data && data.reglas && data.reglas.zona_horaria;
+    try { return new Intl.DateTimeFormat("en-CA", { timeZone: z || undefined, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+    catch (e) { return new Date().toISOString().slice(0, 10); }
+  }
+  function sumarDias(iso, n) { var d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function fmtDia(iso) {
+    if (!iso) return "";
+    try { return new Date(iso + "T12:00:00Z").toLocaleDateString("es", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }); }
+    catch (e) { return iso; }
+  }
+  function faseTorneo(t) {   // "proximo", "curso" o "terminado"
+    var hoy = hoyISO();
+    if (t.termina_el && hoy > t.termina_el) return "terminado";
+    if (t.inicia_el && hoy < t.inicia_el) return "proximo";
+    return "curso";
+  }
+  function fechasTorneo(t) { return t.inicia_el ? "Del " + fmtDia(t.inicia_el) + " al " + fmtDia(t.termina_el) : ""; }
+  function premiosTorneo(t) {
+    return [t.premio1, t.premio2, t.premio3].map(function (p, i) { return p ? { puesto: i + 1, premio: p } : null; }).filter(Boolean);
+  }
   function torneoById(id) { return (data.torneos || []).filter(function (t) { return t.id === id; })[0]; }
   function nombreTorneo(id) { var t = torneoById(id); return t ? t.nombre : "Torneo"; }
   function partsDe(torId) { return (data.torneoParts || []).filter(function (x) { return x.torneo_id === torId; }).map(function (x) { return x.usuario_id; })
@@ -1388,7 +1414,9 @@
   function votosDeReto(rid) { return (data.votosRetos || []).filter(function (v) { return v.reto_id === rid; }); }
   function propuestasPorVotar() {
     return data.retos.filter(function (r) {
+      var t = torneoById(r.torneo_id);
       return r.estado === "propuesto" && new Date(r.propuesta_expira) > Date.now() && soyDelTorneo(r.torneo_id) && r.creado_por !== me.id &&
+        t && faseTorneo(t) !== "terminado" &&
         !votosDeReto(r.id).some(function (v) { return v.usuario_id === me.id; });
     });
   }
@@ -1425,18 +1453,24 @@
   }
   function textoReglas(t) {
     var ps = partsDe(t.id).map(function (id) { return user(id).nombre; });
-    return "🏆 *Torneo: " + t.nombre + "*\n\n📜 *Reglas*\n" +
+    var med = ["🥇", "🥈", "🥉"];
+    return "🏆 *Torneo: " + t.nombre + "*\n" +
+      (t.inicia_el ? "📅 " + fechasTorneo(t) + "\n" : "") +
+      (premiosTorneo(t).length ? "\n🎁 *Premios*\n" + premiosTorneo(t).map(function (p) { return med[p.puesto - 1] + " " + p.premio; }).join("\n") + "\n" : "") +
+      "\n📜 *Reglas*\n" +
       "1️⃣ Cada participante propone *1 solo reto* en el torneo.\n" +
-      "2️⃣ Solo empieza *1 reto por día*. Si un día ya tiene reto, el siguiente aprobado empieza otro día.\n" +
+      "2️⃣ Solo empieza *1 reto por día*, entre la fecha de inicio y la de fin. Si un día ya tiene reto, el siguiente aprobado empieza otro día.\n" +
       "3️⃣ Un reto propuesto necesita *" + VOTOS_TORNEO + " votos a favor* de otros participantes para empezar. Si en *24 horas* no los consigue, se elimina y quien lo propuso puede proponer otro.\n" +
       "4️⃣ Cada reto da 3, 2 y 1 puntos a los tres primeros (solo cuentan fotos aceptadas por el juez). El *podio del torneo* suma los puntos de sus retos.\n\n" +
       "👥 Participantes (" + ps.length + "): " + ps.join(", ") + "\n\n¡A jugar! 👇\n" + location.origin + location.pathname;
   }
   function textoPodio(t, tb) {
     var med = ["🥇", "🥈", "🥉"];
-    return "🏆 *Podio del torneo: " + t.nombre + "*\n\n" +
+    var fin = faseTorneo(t) === "terminado";
+    return "🏆 *" + (fin ? "Resultado final" : "Podio") + " del torneo: " + t.nombre + "*\n" + (t.inicia_el ? "📅 " + fechasTorneo(t) + "\n" : "") + "\n" +
       (tb.filas.length ? tb.filas.slice(0, 10).map(function (f) {
-        return (med[f.puesto - 1] || f.puesto + ".") + " " + user(f.id).nombre + " · " + pts(f.pts);
+        var pr = f.puesto <= 3 && t["premio" + f.puesto];
+        return (med[f.puesto - 1] || f.puesto + ".") + " " + user(f.id).nombre + " · " + pts(f.pts) + (pr ? " 🎁 " + pr : "");
       }).join("\n") : "Todavía no hay puntos.") + "\n\nVer el torneo 👇\n" + location.origin + location.pathname;
   }
 
@@ -1446,7 +1480,10 @@
         'El administrador puede crear uno con un nombre y sus participantes.</p></section>';
       return;
     }
-    var lista = data.torneos.slice().sort(function (a, b) { return (soyDelTorneo(b.id) ? 1 : 0) - (soyDelTorneo(a.id) ? 1 : 0); });
+    var orden = { curso: 0, proximo: 1, terminado: 2 };
+    var lista = data.torneos.slice().sort(function (a, b) {
+      return orden[faseTorneo(a)] - orden[faseTorneo(b)] || (soyDelTorneo(b.id) ? 1 : 0) - (soyDelTorneo(a.id) ? 1 : 0);
+    });
     $app.innerHTML = lista.map(renderTorneo).join("");
     bindTorneos();
     updateClock();
@@ -1457,36 +1494,46 @@
     var jugados = retos.filter(function (r) { return r.estado === "terminado" || r.estado === "activo" || r.estado === "cancelado"; })
       .sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
     var programados = retos.filter(function (r) { return r.estado === "programado"; }).sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
-    var propuestas = retos.filter(function (r) { return r.estado === "propuesto" && new Date(r.propuesta_expira) > now; });
+    var propuestas = faseTorneo(t) === "terminado" ? [] : retos.filter(function (r) { return r.estado === "propuesto" && new Date(r.propuesta_expira) > now; });
     var tb = tabla(jugados), top = tb.filas.slice(0, 3);
     var miReto = me && retos.filter(function (r) { return r.creado_por === me.id && r.estado !== "propuesto"; })[0];
     var miProp = me && propuestas.filter(function (r) { return r.creado_por === me.id; })[0];
     var sinReto = parts.filter(function (id) { return !retos.some(function (r) { return r.creado_por === id && r.estado !== "propuesto"; }); });
+    var fase = faseTorneo(t), premios = premiosTorneo(t), med = ["🥇", "🥈", "🥉"];
+    var tagTxt = fase === "terminado" ? "Terminado" : fase === "proximo" ? "Empieza " + fmtDia(t.inicia_el) : soy ? "Participas · en curso" : "En curso";
 
     var podium = top.length ? '<div class="podium">' + [1, 0, 2].map(function (i) {
       var f = top[i]; if (!f) return '<div class="step empty"></div>';
       var u = user(f.id);
       return '<div class="step p' + f.puesto + '"><div class="step-av">' + esc(u.avatar) + '</div>' +
-        '<div class="step-name">' + esc(u.nombre) + '</div><div class="step-pts">' + pts(f.pts) + '</div><div class="step-block">' + f.puesto + '</div></div>';
+        '<div class="step-name">' + esc(u.nombre) + '</div><div class="step-pts">' + pts(f.pts) + '</div>' +
+        (t["premio" + f.puesto] ? '<div class="step-prize">🎁 ' + esc(t["premio" + f.puesto]) + '</div>' : "") +
+        '<div class="step-block">' + f.puesto + '</div></div>';
     }).join("") + '</div>' : '<p class="hint">Todavía no hay puntos: ningún reto del torneo ha terminado.</p>';
 
     return '<section class="card camp torneo">' +
-      '<div class="tag ' + (soy ? "live" : "") + '">' + (soy ? "Participas" : "Torneo") + '</div>' +
+      '<div class="tag ' + (fase === "curso" ? "live" : "") + '">' + esc(tagTxt) + '</div>' +
       '<h2>🏆 ' + esc(t.nombre) + '</h2>' +
+      (t.inicia_el ? '<p class="torneo-fechas">📅 ' + fechasTorneo(t) + '</p>' : "") +
+      (premios.length ? '<ul class="premios">' + premios.map(function (p) {
+        return '<li><span>' + med[p.puesto - 1] + '</span><span><small>' + (p.puesto === 1 ? "Campeón" : p.puesto + ".º puesto") + '</small><b>' + esc(p.premio) + '</b></span></li>';
+      }).join("") + '</ul>' : "") +
+      (fase === "terminado" && tb.lideres.length ? '<div class="campeon">🏆 ' + (tb.lideres.length > 1 ? "Empate en el primer puesto: <b>" + esc(listaNombres(tb.lideres)) + "</b>"
+        : "Campeón: <b>" + esc(user(tb.lideres[0].id).nombre) + "</b>" + (t.premio1 ? " · se lleva " + esc(t.premio1) : "")) + '</div>' : "") +
       '<p class="sub">' + parts.length + ' participantes · ' + jugados.filter(function (r) { return r.estado === "terminado"; }).length + ' retos terminados · ' +
         sinReto.length + ' aún sin reto</p>' +
       '<div class="parts-row">' + parts.map(function (id) { var u = user(id); return '<span title="' + esc(u.nombre) + '">' + esc(u.avatar) + '</span>'; }).join("") + '</div>' +
       // reglas
       '<details class="reglas"><summary>📜 Reglas del torneo</summary><ol>' +
         '<li>Cada participante propone <b>1 solo reto</b> en el torneo.</li>' +
-        '<li>Solo empieza <b>1 reto por día</b>. Si un día ya tiene reto, el siguiente aprobado empieza otro día a la hora de inicio.</li>' +
+        '<li>Solo empieza <b>1 reto por día</b>' + (t.inicia_el ? ', entre el ' + fmtDia(t.inicia_el) + ' y el ' + fmtDia(t.termina_el) : "") + '. Si un día ya tiene reto, el siguiente aprobado empieza otro día a la hora de inicio.</li>' +
         '<li>Un reto propuesto necesita <b>' + VOTOS_TORNEO + ' votos a favor</b> de otros participantes para empezar. Si en <b>24 horas</b> no los consigue, se elimina y quien lo propuso puede proponer otro.</li>' +
         '<li>Cada reto da 3, 2 y 1 puntos a los tres primeros. El <b>podio del torneo</b> suma los puntos de sus retos.</li></ol>' +
         (parts.length < VOTOS_TORNEO + 1 ? '<p class="hint">⚠️ Con ' + parts.length + ' participantes ningún reto puede llegar a ' + VOTOS_TORNEO + ' votos: hacen falta al menos ' + (VOTOS_TORNEO + 1) + '.</p>' : "") +
         '</details>' +
       waButton(textoReglas(t), "Compartir reglas por WhatsApp", "small ghost-wa") +
       // mi situación
-      (soy ? '<div class="mi-torneo">' + (miReto ? 'Tu reto en este torneo: <b>' + esc(miReto.emoji + " " + miReto.que_buscar) + '</b> (' + ESTADOS[miReto.estado].toLowerCase() + ').'
+      (soy && fase === "terminado" ? "" : soy ? '<div class="mi-torneo">' + (miReto ? 'Tu reto en este torneo: <b>' + esc(miReto.emoji + " " + miReto.que_buscar) + '</b> (' + ESTADOS[miReto.estado].toLowerCase() + ').'
         : miProp ? 'Tu propuesta <b>' + esc(miProp.emoji + " " + miProp.que_buscar) + '</b> está en votación.'
         : '<button class="btn primary wide" data-proponer="' + t.id + '">+ Proponer mi reto</button>') + '</div>' : "") +
       // propuestas en votación
@@ -1706,6 +1753,14 @@
       html += '<form id="campForm" class="stack-form camp-form">' +
         '<label class="label" for="campName">' + (f.id ? "Editar torneo" : "Nuevo torneo") + '</label>' +
         '<input id="campName" maxlength="60" placeholder="Ej: Torneo de noviembre" required value="' + esc(f.nombre) + '">' +
+        '<div class="row fechas"><label><span class="label">Empieza</span><input type="date" id="campIni" required value="' + esc(f.inicio) + '"></label>' +
+        '<label><span class="label">Termina</span><input type="date" id="campFin" required value="' + esc(f.fin) + '"></label></div>' +
+        '<label class="label" for="campP1">🥇 Premio para el campeón</label>' +
+        '<input id="campP1" maxlength="100" required placeholder="Ej: Cena en el restaurante que elija" value="' + esc(f.p1) + '">' +
+        '<label class="label" for="campP2">🥈 Premio para el 2.º <span class="muted">(opcional)</span></label>' +
+        '<input id="campP2" maxlength="100" placeholder="Opcional" value="' + esc(f.p2) + '">' +
+        '<label class="label" for="campP3">🥉 Premio para el 3.º <span class="muted">(opcional)</span></label>' +
+        '<input id="campP3" maxlength="100" placeholder="Opcional" value="' + esc(f.p3) + '">' +
         '<p class="label">Participantes <span class="muted">(' + f.parts.length + ' elegidos; mínimo ' + (VOTOS_TORNEO + 1) + ' para que los retos puedan llegar a ' + VOTOS_TORNEO + ' votos)</span></p>' +
         '<div class="row"><button type="button" class="btn small ghost" id="campAll">Todos</button><button type="button" class="btn small ghost" id="campNone">Ninguno</button></div>' +
         '<ul class="check-list" id="campParts">' + data.usuarios.map(function (u) {
@@ -1718,7 +1773,8 @@
     } else {
       html += ((data.torneos || []).length ? '<ul class="admin-list">' + data.torneos.map(function (t) {
         var rs = retosDeTorneo(t.id);
-        return '<li><div class="admin-info"><b>🏆 ' + esc(t.nombre) + '</b><small>' + partsDe(t.id).length + ' participantes · ' +
+        return '<li><div class="admin-info"><b>🏆 ' + esc(t.nombre) + '</b><small>' + (t.inicia_el ? fechasTorneo(t) + ' · ' : "") +
+          (t.premio1 ? '🥇 ' + esc(t.premio1) + '<br>' : "") + partsDe(t.id).length + ' participantes · ' +
           rs.filter(function (r) { return r.estado !== "propuesto"; }).length + ' retos · ' + rs.filter(function (r) { return r.estado === "propuesto"; }).length + ' en votación</small></div>' +
           '<div class="admin-actions"><button class="btn small" data-camp="edit" data-id="' + t.id + '">Editar</button>' +
           '<button class="btn small danger" data-camp="del" data-id="' + t.id + '">Eliminar</button></div></li>';
@@ -1729,11 +1785,12 @@
   }
 
   function bindCampAdmin() {
-    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", parts: [] }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
+    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", parts: [], inicio: hoyISO(), fin: sumarDias(hoyISO(), 14), p1: "", p2: "", p3: "" }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
     $app.querySelectorAll("[data-camp]").forEach(function (b) {
       b.onclick = function () {
         var t = torneoById(b.dataset.id); if (!t) return;
-        if (b.dataset.camp === "edit") { campForm = { id: t.id, nombre: t.nombre, parts: partsDe(t.id) }; renderAdmin(); el("campSection").scrollIntoView(); return; }
+        if (b.dataset.camp === "edit") { campForm = { id: t.id, nombre: t.nombre, parts: partsDe(t.id), inicio: t.inicia_el || hoyISO(), fin: t.termina_el || sumarDias(hoyISO(), 14),
+          p1: t.premio1 || "", p2: t.premio2 || "", p3: t.premio3 || "" }; renderAdmin(); el("campSection").scrollIntoView(); return; }
         if (!confirm("¿Eliminar el torneo «" + t.nombre + "»? Se borran sus propuestas y retos programados; los retos ya jugados quedan como retos libres.")) return;
         guard(async function () {
           must(await db.rpc("admin_eliminar_torneo", { p_clave: adminClave, p_id: t.id }));
@@ -1743,6 +1800,9 @@
     });
     if (!el("campForm")) return;
     el("campName").oninput = function () { campForm.nombre = this.value; };
+    [["campIni", "inicio"], ["campFin", "fin"], ["campP1", "p1"], ["campP2", "p2"], ["campP3", "p3"]].forEach(function (x) {
+      el(x[0]).oninput = el(x[0]).onchange = function () { campForm[x[1]] = this.value; };
+    });
     function marcar(ids) { campForm.parts = ids; renderAdmin(); el("campSection").scrollIntoView(); }
     el("campAll").onclick = function () { marcar(data.usuarios.map(function (u) { return u.id; })); };
     el("campNone").onclick = function () { marcar([]); };
@@ -1757,8 +1817,11 @@
     el("campForm").onsubmit = function (e) {
       e.preventDefault();
       if (campForm.parts.length < 2) return toast(ERRORS.pocos_participantes);
+      if (!campForm.inicio || !campForm.fin || campForm.fin < campForm.inicio) return toast(ERRORS.fechas_invalidas);
+      if (!campForm.p1.trim()) return toast(ERRORS.premio_invalido);
       guard(async function () {
-        must(await db.rpc("admin_guardar_torneo", { p_clave: adminClave, p_id: campForm.id, p_nombre: campForm.nombre, p_participantes: campForm.parts }));
+        must(await db.rpc("admin_guardar_torneo", { p_clave: adminClave, p_id: campForm.id, p_nombre: campForm.nombre, p_participantes: campForm.parts,
+          p_inicio: campForm.inicio, p_fin: campForm.fin, p_premio1: campForm.p1, p_premio2: campForm.p2, p_premio3: campForm.p3 }));
         toast(campForm.id ? "Torneo guardado" : "Torneo creado");
         campForm = null; await reload(); renderAdmin();
       });
