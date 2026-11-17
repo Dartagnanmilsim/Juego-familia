@@ -20,7 +20,7 @@
     { min: 15, label: "15 min" }, { min: 30, label: "30 min" }, { min: 60, label: "1 hora" },
     { min: 180, label: "3 horas" }, { min: 1440, label: "1 día" }, { min: 10080, label: "1 semana" }
   ];
-  var ESTADOS = { activo: "En marcha", terminado: "Terminado", cancelado: "Cancelado" };
+  var ESTADOS = { propuesto: "En votación", programado: "Programado", activo: "En marcha", terminado: "Terminado", cancelado: "Cancelado" };
   var ERRORS = {
     credenciales_incorrectas: "Usuario o clave incorrectos.",
     usuario_existe: "Ese usuario ya existe. Elige otro o entra con tu clave.",
@@ -52,6 +52,15 @@
     ya_pediste_votacion: "Ya pediste la votación del pueblo para esta condena.",
     votacion_cerrada: "La votación ya está cerrada.",
     no_puedes_votarte: "No puedes votar en tu propia votación.",
+    pocos_participantes: "Elige al menos 2 participantes.",
+    torneo_no_existe: "Ese torneo ya no existe.",
+    no_eres_del_torneo: "No eres participante de este torneo.",
+    juez_no_es_del_torneo: "El juez tiene que ser participante del torneo.",
+    ya_tienes_reto_en_torneo: "Ya tienes tu reto en este torneo (solo 1 por participante).",
+    ya_tienes_propuesta: "Ya tienes una propuesta en votación en este torneo.",
+    no_votas_tu_reto: "No puedes votar tu propio reto.",
+    meta_invalida: "Elige cuántas fotos hacen falta (1 a 100).",
+    reto_invalido: "Escribe cuál es el reto.",
     el_juez_no_vota: "Quien te encarceló no puede votar.",
     motivo_largo: "El motivo puede tener como máximo 200 caracteres.",
     fuera_de_horario: "Ahora no se pueden crear retos: estás fuera del horario permitido.",
@@ -71,7 +80,7 @@
   var draft = { emoji: "🎯", que: "", meta: 10, min: 60, juez: null, todos: true, parts: [] };
   var sel = null;                // reto abierto en el módulo Retos
   var creating = false;          // mostrando el formulario "crear reto"
-  var campForm = null;           // formulario de campeonato del administrador: { id, nombre, retos: [] }
+  var campForm = null;           // formulario de torneo del administrador: { id, nombre, parts: [] }
   var justCreated = null;        // id del reto recién creado: muestra "Avisar por WhatsApp" destacado
   // Enlace directo a un reto: retos.html?reto=<id> (lo trae el mensaje de WhatsApp)
   (function () {
@@ -155,7 +164,7 @@
   }
   function setHeader() {
     var logged = !!me, inApp = view === "retos" || view === "podio" || view === "usuarios" || view === "admin" || view === "admin-login";
-    el("barTitle").textContent = { retos: "Retos", podio: "Podio", usuarios: "Usuarios", admin: "Administrador", "admin-login": "Administrador" }[view] || "Retos en familia";
+    el("barTitle").textContent = { retos: "Retos", podio: "Torneos", usuarios: "Usuarios", admin: "Administrador", "admin-login": "Administrador" }[view] || "Retos en familia";
     el("barSub").hidden = !logged;
     el("barSub").textContent = logged ? "@" + me.usuario : "";
     el("meBtn").hidden = !logged;
@@ -360,11 +369,16 @@
         db.from("campeonatos").select("*").order("creado_en", { ascending: false }),
         db.from("campeonato_retos").select("*"),
         db.from("presos").select("*").order("desde", { ascending: false }).limit(300),
-        db.from("votos_presos").select("*")
+        db.from("votos_presos").select("*"),
+        db.from("torneos").select("*").order("creado_en", { ascending: false }),
+        db.from("torneo_participantes").select("*"),
+        db.from("votos_retos").select("*")
       ]);
       var next = { usuarios: must(r[0]), retos: must(r[1]), puntajes: must(r[2]), participantes: must(r[3]),
         campeonatos: must(r[4]), campeonatoRetos: must(r[5]),
-        presos: r[6].error ? [] : r[6].data, votosPresos: r[7].error ? [] : r[7].data, fotos: [], votos: [], reglas: null };
+        presos: r[6].error ? [] : r[6].data, votosPresos: r[7].error ? [] : r[7].data,
+        torneos: r[8].error ? [] : r[8].data, torneoParts: r[9].error ? [] : r[9].data, votosRetos: r[10].error ? [] : r[10].data,
+        fotos: [], votos: [], reglas: null };
       try { var rg = await db.rpc("reglas_juego"); if (!rg.error) next.reglas = rg.data; } catch (e) {}
       var ids = next.retos.filter(function (x) { return x.estado === "activo" || x.id === sel; }).map(function (x) { return x.id; });
       var fv = await Promise.all(ids.map(function (id) {
@@ -399,7 +413,7 @@
   function startLive() {
     stopLive();
     channel = db.channel("retos-en-familia");
-    ["usuarios", "retos", "fotos", "puntajes", "votos", "participantes", "campeonatos", "campeonato_retos", "presos", "votos_presos"].forEach(function (t) {
+    ["usuarios", "retos", "fotos", "puntajes", "votos", "participantes", "campeonatos", "campeonato_retos", "presos", "votos_presos", "torneos", "torneo_participantes", "votos_retos"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
     });
     channel.subscribe();
@@ -568,13 +582,14 @@
         return '<li><button class="reto-card" data-open="' + r.id + '">' +
           '<span class="reto-emoji">' + esc(r.emoji) + '</span>' +
           '<span class="reto-body"><b>' + r.meta + " fotos · " + esc(r.que_buscar) + '</b>' +
+          (r.torneo_id ? '<small class="torneo-tag">🏆 ' + esc(nombreTorneo(r.torneo_id)) + '</small>' : "") +
           '<small>Juez ' + esc(user(juezDe(r)).nombre) + ' · ' + esc(quien) + ' · <span data-left="' + r.id + '"></span></small>' +
           rolBadge(r) +
           (compite(r, me.id) ? '<small>Tus fotos aceptadas: <b>' + mine.ok + '/' + r.meta + '</b>' + (mine.pend ? " · " + mine.pend + " esperando" : "") + '</small>' : "") +
           (juezDe(r) === me.id && pend ? '<small class="to-review">' + pend + ' foto' + (pend === 1 ? "" : "s") + ' por revisar</small>' : "") +
           '</span><span class="reto-go">›</span></button></li>';
       }).join("") + '</ul>' : '<p class="hint">No hay retos en marcha.' + (hz.abierto ? ' ¡Crea uno!' : '') + '</p>') +
-      '</section>' + renderCalabozo();
+      '</section>' + avisoPropuestas() + renderCalabozo();
   }
 
   function renderActive(r) {
@@ -611,7 +626,8 @@
       '<div class="tag live">En marcha</div>' +
       '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
       '<h2>Gana el primero en conseguir <span class="goal">' + r.meta + ' fotos aceptadas</span> de: <span class="goal">' + esc(r.que_buscar) + '</span></h2>' +
-      '<p class="sub">Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '<br>' +
+      '<p class="sub">' + (r.torneo_id ? '🏆 Torneo <b>' + esc(nombreTorneo(r.torneo_id)) + '</b><br>' : "") +
+      'Juez: <b>' + esc(juez.avatar + " " + juez.nombre) + '</b> · lo creó ' + esc(user(r.creado_por).nombre) + '<br>' +
       (r.para_todos !== false ? "Para todos" : "Solo para: " + esc(lista.map(function (u) { return u.nombre; }).join(", "))) + '</p>' +
       '<div class="clock-wrap"><span data-left="' + r.id + '"></span></div>' +
       accion +
@@ -684,10 +700,13 @@
   }
 
   function renderNewForm() {
-    if (!draft.juez || !data.usuarios.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
-    return '<button class="btn ghost back-btn" id="backList">← Volver a los retos</button>' +
+    var tor = draft.torneo && torneoById(draft.torneo);
+    var jueces = tor ? partsDe(tor.id).map(user) : data.usuarios;
+    if (!draft.juez || !jueces.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
+    return '<button class="btn ghost back-btn" id="backList">← ' + (tor ? "Volver al torneo" : "Volver a los retos") + '</button>' +
       '<section class="card">' +
-      '<h2>Nuevo reto</h2>' +
+      (tor ? '<h2>Proponer mi reto</h2><p class="sub">🏆 Torneo <b>' + esc(tor.nombre) + '</b>. Tu reto necesita ' + VOTOS_TORNEO +
+        ' votos a favor de otros participantes en 24 horas para empezar. Solo puedes tener 1 reto en el torneo.</p>' : '<h2>Nuevo reto</h2>') +
       (data.reglas ? '<p class="hint">Horario para crear retos: ' + horario().rango + ' (hora de ' + esc(horario().zona) + ').</p>' : "") +
       '<p class="label">¿Cuál es el reto? Escribe lo que quieras fotografiar</p>' +
       '<div class="row"><input id="rEmoji" class="emoji-in" maxlength="4" value="' + esc(draft.emoji) + '" aria-label="Emoji">' +
@@ -703,9 +722,10 @@
         return '<button type="button" class="chip' + (d.min === draft.min ? " on" : "") + '" data-m="' + d.min + '">' + d.label + '</button>';
       }).join("") + '</div>' +
       '<p class="label">Juez <span class="muted">· acepta o elimina las fotos y no compite</span></p>' +
-      '<div class="chips" id="judges">' + data.usuarios.map(function (u) {
+      '<div class="chips" id="judges">' + jueces.map(function (u) {
         return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '">' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + '</button>';
       }).join("") + '</div>' +
+      (tor ? '<p class="label">Participantes</p><p class="hint">Compiten todos los participantes del torneo menos el juez.</p>' :
       '<p class="label">Participantes</p>' +
       '<div class="seg" id="forWho"><button type="button" data-todos="1" class="' + (draft.todos ? "on" : "") + '">Para todos</button>' +
       '<button type="button" data-todos="0" class="' + (draft.todos ? "" : "on") + '">Solo para algunos</button></div>' +
@@ -714,8 +734,8 @@
         var esJuez = u.id === draft.juez;
         return '<button type="button" class="chip' + (draft.parts.indexOf(u.id) >= 0 && !esJuez ? " on" : "") + (esJuez ? " disabled" : "") + '" data-p="' + u.id + '"' + (esJuez ? " disabled" : "") + '>' +
           esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + (esJuez ? " · juez" : "") + '</button>';
-      }).join("") + '</div></div>' +
-      '<button class="btn primary wide" id="launch">Lanzar reto</button>' +
+      }).join("") + '</div></div>') +
+      '<button class="btn primary wide" id="launch">' + (tor ? "Proponer reto (necesita " + VOTOS_TORNEO + " votos)" : "Lanzar reto") + '</button>' +
       '</section>';
   }
 
@@ -741,7 +761,7 @@
   }
 
   function renderHistory() {
-    var done = data.retos.filter(function (r) { return r.estado !== "activo"; });
+    var done = data.retos.filter(function (r) { return r.estado === "terminado" || r.estado === "cancelado"; });
     if (!done.length) return "";
     return '<section class="card"><h2>Historial</h2><ul class="history">' +
       done.map(function (r) {
@@ -752,11 +772,15 @@
   }
 
   function openReto(id) { sel = id; creating = false; window.scrollTo(0, 0); reload(); render(); }
-  function backToList() { sel = null; creating = false; justCreated = null; render(); window.scrollTo(0, 0); }
+  function backToList() {
+    if (creating && draft.torneo) { draft.torneo = null; creating = false; view = "podio"; render(); window.scrollTo(0, 0); return; }
+    sel = null; creating = false; justCreated = null; render(); window.scrollTo(0, 0);
+  }
 
   function bindGame(r) {
     $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
     bindCalabozo(r);
+    if (el("irTorneos")) el("irTorneos").onclick = function () { goTab("podio"); };
     $app.querySelectorAll("[data-open]").forEach(function (b) { b.onclick = function () { openReto(b.dataset.open); }; });
     if (el("backList")) el("backList").onclick = backToList;
     if (el("newReto")) el("newReto").onclick = function () { creating = true; sel = null; render(); window.scrollTo(0, 0); };
@@ -793,13 +817,13 @@
       draft.parts = draft.parts.filter(function (x) { return x !== draft.juez; });
       render();   // actualiza la lista de participantes (el juez no compite)
     };
-    el("forWho").onclick = function (e) {
+    if (el("forWho")) el("forWho").onclick = function (e) {
       var b = e.target.closest("button"); if (!b) return;
       draft.todos = b.dataset.todos === "1";
       if (!draft.todos && !draft.parts.length && draft.juez !== me.id) draft.parts = [me.id];
       render();
     };
-    el("parts").onclick = function (e) {
+    if (el("parts")) el("parts").onclick = function (e) {
       var b = e.target.closest(".chip"); if (!b || b.disabled) return;
       var id = b.dataset.p, i = draft.parts.indexOf(id);
       if (i >= 0) draft.parts.splice(i, 1); else draft.parts.push(id);
@@ -809,6 +833,16 @@
       if (!draft.que.trim()) { el("rQue").focus(); return toast("Escribe cuál es el reto"); }
       var hz = horario();
       if (!hz.abierto) return toast("Solo se pueden crear retos de " + hz.rango + " (hora de " + hz.zona + "). Ahora son las " + hz.ahora + ".", 5000);
+      if (draft.torneo) {
+        var torId = draft.torneo;
+        return guard(async function () {
+          must(await db.rpc("proponer_reto", { p_token: token, p_torneo: torId, p_que: draft.que, p_emoji: draft.emoji,
+            p_meta: draft.meta, p_minutos: draft.min, p_juez: draft.juez }));
+          toast("🗳️ Reto propuesto. Necesita " + VOTOS_TORNEO + " votos a favor en 24 h.", 5000);
+          draft.que = ""; draft.torneo = null; creating = false; sel = null; view = "podio";
+          await reload(); render(); window.scrollTo(0, 0);
+        });
+      }
       var parts = draft.parts.filter(function (x) { return x !== draft.juez; });
       if (!draft.todos && !parts.length) return toast(ERRORS.sin_participantes);
       guard(async function () {
@@ -1343,15 +1377,30 @@
     }
   }
 
-  // ============================================================ PODIO (campeonatos)
-  function retosDeCamp(c) {
-    var ids = data.campeonatoRetos.filter(function (x) { return x.campeonato_id === c.id; }).map(function (x) { return x.reto_id; });
-    return data.retos.filter(function (r) { return ids.indexOf(r.id) >= 0; })
-      .sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
+  // ============================================================ TORNEOS
+  var VOTOS_TORNEO = 5;
+  function torneoById(id) { return (data.torneos || []).filter(function (t) { return t.id === id; })[0]; }
+  function nombreTorneo(id) { var t = torneoById(id); return t ? t.nombre : "Torneo"; }
+  function partsDe(torId) { return (data.torneoParts || []).filter(function (x) { return x.torneo_id === torId; }).map(function (x) { return x.usuario_id; })
+    .filter(function (id) { return data.usuarios.some(function (u) { return u.id === id; }); }); }
+  function soyDelTorneo(torId) { return me && partsDe(torId).indexOf(me.id) >= 0; }
+  function retosDeTorneo(torId) { return data.retos.filter(function (r) { return r.torneo_id === torId; }); }
+  function votosDeReto(rid) { return (data.votosRetos || []).filter(function (v) { return v.reto_id === rid; }); }
+  function propuestasPorVotar() {
+    return data.retos.filter(function (r) {
+      return r.estado === "propuesto" && new Date(r.propuesta_expira) > Date.now() && soyDelTorneo(r.torneo_id) && r.creado_por !== me.id &&
+        !votosDeReto(r.id).some(function (v) { return v.usuario_id === me.id; });
+    });
   }
-  // Suma los puntos de los retos del campeonato. Desempate: más retos ganados, luego más fotos aceptadas.
-  function tabla(c) {
-    var retos = retosDeCamp(c), ids = retos.map(function (r) { return r.id; }), filas = {};
+  function avisoPropuestas() {
+    var n = propuestasPorVotar().length; if (!n) return "";
+    return '<button class="card aviso-torneo" id="irTorneos">🗳️ <b>' + n + (n === 1 ? " reto propuesto espera" : " retos propuestos esperan") +
+      ' tu voto</b> en los torneos ›</button>';
+  }
+
+  // Suma los puntos de los retos del torneo. Desempate: más retos ganados, luego más fotos aceptadas.
+  function tabla(retos) {
+    var ids = retos.map(function (r) { return r.id; }), filas = {};
     data.puntajes.forEach(function (p) {
       if (ids.indexOf(p.reto_id) < 0) return;
       var f = filas[p.usuario_id] || (filas[p.usuario_id] = { id: p.usuario_id, pts: 0, wins: 0, fotos: 0, por: {} });
@@ -1367,74 +1416,141 @@
       if (!prev || prev.pts !== f.pts || prev.wins !== f.wins || prev.fotos !== f.fotos) puesto = i + 1;
       f.puesto = puesto;
     });
-    var terminados = retos.filter(function (r) { return r.estado !== "activo"; }).length;
-    var lideres = lista.filter(function (f) { return f.puesto === 1; });
-    return { retos: retos, filas: lista, lideres: lideres, terminados: terminados, final: retos.length > 0 && terminados === retos.length };
+    return { filas: lista, lideres: lista.filter(function (f) { return f.puesto === 1; }) };
   }
-
   function pts(n) { return n + (n === 1 ? " pt" : " pts"); }
   function listaNombres(fs) {
     var n = fs.map(function (f) { return user(f.id).nombre; });
     return n.length > 1 ? n.slice(0, -1).join(", ") + " y " + n[n.length - 1] : n[0];
   }
-  function textoPodio(c, t) {
+  function textoReglas(t) {
+    var ps = partsDe(t.id).map(function (id) { return user(id).nombre; });
+    return "🏆 *Torneo: " + t.nombre + "*\n\n📜 *Reglas*\n" +
+      "1️⃣ Cada participante propone *1 solo reto* en el torneo.\n" +
+      "2️⃣ Solo empieza *1 reto por día*. Si un día ya tiene reto, el siguiente aprobado empieza otro día.\n" +
+      "3️⃣ Un reto propuesto necesita *" + VOTOS_TORNEO + " votos a favor* de otros participantes para empezar. Si en *24 horas* no los consigue, se elimina y quien lo propuso puede proponer otro.\n" +
+      "4️⃣ Cada reto da 3, 2 y 1 puntos a los tres primeros (solo cuentan fotos aceptadas por el juez). El *podio del torneo* suma los puntos de sus retos.\n\n" +
+      "👥 Participantes (" + ps.length + "): " + ps.join(", ") + "\n\n¡A jugar! 👇\n" + location.origin + location.pathname;
+  }
+  function textoPodio(t, tb) {
     var med = ["🥇", "🥈", "🥉"];
-    return "🏆 *" + c.nombre + "*\n" + (t.final ? "¡Campeonato terminado!" : "Retos terminados: " + t.terminados + " de " + t.retos.length) + "\n\n" +
-      (t.filas.length ? t.filas.slice(0, 10).map(function (f) {
+    return "🏆 *Podio del torneo: " + t.nombre + "*\n\n" +
+      (tb.filas.length ? tb.filas.slice(0, 10).map(function (f) {
         return (med[f.puesto - 1] || f.puesto + ".") + " " + user(f.id).nombre + " · " + pts(f.pts);
-      }).join("\n") : "Todavía no hay puntos.") +
-      (t.final && t.lideres.length === 1 ? "\n\n👑 Campeón: *" + user(t.lideres[0].id).nombre + "*" : "") +
-      (t.final && t.lideres.length > 1 ? "\n\n👑 Empate en el primer puesto: *" + listaNombres(t.lideres) + "*" : "") +
-      "\n\nVer el podio 👇\n" + location.origin + location.pathname;
+      }).join("\n") : "Todavía no hay puntos.") + "\n\nVer el torneo 👇\n" + location.origin + location.pathname;
   }
 
-  function renderPodio() {
-    if (!data.campeonatos.length) {
-      $app.innerHTML = '<section class="card empty-state"><h2>Podio</h2><p class="sub">Todavía no hay campeonatos. ' +
-        'El administrador puede crear uno juntando varios retos: sus puntos se suman y sale un campeón.</p></section>';
+  function renderPodio() {   // pestaña "Torneos"
+    if (!(data.torneos || []).length) {
+      $app.innerHTML = '<section class="card empty-state"><h2>Torneos</h2><p class="sub">Todavía no hay torneos. ' +
+        'El administrador puede crear uno con un nombre y sus participantes.</p></section>';
       return;
     }
-    $app.innerHTML = data.campeonatos.map(function (c) {
-      var t = tabla(c), top = t.filas.slice(0, 3);
-      var podium = top.length ? '<div class="podium">' + [1, 0, 2].map(function (i) {
-        var f = top[i]; if (!f) return '<div class="step empty"></div>';
-        var u = user(f.id);
-        return '<div class="step p' + f.puesto + '"><div class="step-av">' + esc(u.avatar) + '</div>' +
-          '<div class="step-name">' + esc(u.nombre) + '</div><div class="step-pts">' + pts(f.pts) + '</div>' +
-          '<div class="step-block">' + f.puesto + '</div></div>';
-      }).join("") + '</div>' : '<p class="hint">Todavía no hay puntos: ningún reto del campeonato ha terminado.</p>';
-      var champ = t.final && t.lideres.length === 1 ? user(t.lideres[0].id) : null;
-      var empate = t.final && t.lideres.length > 1;
-      return '<section class="card camp">' +
-        '<div class="tag ' + (t.final ? "done" : "live") + '">' + (t.final ? "Terminado" : "En juego") + '</div>' +
-        '<h2>' + esc(c.nombre) + '</h2>' +
-        '<p class="sub">' + t.terminados + ' de ' + t.retos.length + ' retos terminados</p>' +
-        (champ ? '<div class="champion">👑 Campeón: <b>' + esc(champ.avatar + " " + champ.nombre) + '</b></div>'
-         : empate ? '<div class="champion">👑 Empate en el primer puesto: <b>' + esc(listaNombres(t.lideres)) + '</b>' +
-                    '<small>Tienen los mismos puntos, retos ganados y fotos aceptadas. El administrador puede añadir un reto de desempate al campeonato.</small></div>'
-         : (t.filas.length ? '<div class="leader">Va ganando: <b>' + esc(listaNombres(t.lideres)) + '</b></div>' : "")) +
-        podium +
-        (t.filas.length ? '<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th>' +
-          t.retos.map(function (r, i) { return '<th title="' + esc(r.que_buscar) + '">R' + (i + 1) + '</th>'; }).join("") +
-          '<th>Total</th></tr></thead><tbody>' +
-          t.filas.map(function (f) {
-            var u = user(f.id);
-            return '<tr' + (me && f.id === me.id ? ' class="is-me"' : "") + '><td>' + f.puesto + '</td><td class="pl">' + esc(u.avatar + " " + u.nombre) + '</td>' +
-              t.retos.map(function (r) { return '<td>' + (r.id in f.por ? f.por[r.id] : (r.estado === "activo" ? "·" : "–")) + '</td>'; }).join("") +
-              '<td class="tot">' + f.pts + '</td></tr>';
-          }).join("") + '</tbody></table></div>' : "") +
-        '<ul class="camp-retos">' + t.retos.map(function (r, i) {
-          var w = r.ganador_id ? user(r.ganador_id) : null;
-          return '<li><button class="hist-item" data-reto="' + r.id + '"><span><b>R' + (i + 1) + '</b> ' + esc(r.emoji + " " + r.que_buscar) +
-            '<small>' + fmtDate(r.inicia_en) + '</small></span><span>' +
-            (r.estado === "activo" ? "En marcha" : r.estado === "cancelado" ? "Cancelado" : w ? "Ganó " + esc(w.nombre) : "Sin ganador") + ' ›</span></button></li>';
-        }).join("") + '</ul>' +
-        '<p class="hint">Cada reto da 3, 2 y 1 puntos a los tres primeros. Empate: gana quien tenga más retos ganados y luego más fotos aceptadas.</p>' +
-        waButton(textoPodio(c, t), "Compartir podio por WhatsApp", "wide ghost-wa") +
-        '</section>';
-    }).join("");
+    var lista = data.torneos.slice().sort(function (a, b) { return (soyDelTorneo(b.id) ? 1 : 0) - (soyDelTorneo(a.id) ? 1 : 0); });
+    $app.innerHTML = lista.map(renderTorneo).join("");
+    bindTorneos();
+    updateClock();
+  }
+
+  function renderTorneo(t) {
+    var retos = retosDeTorneo(t.id), parts = partsDe(t.id), soy = soyDelTorneo(t.id), now = Date.now();
+    var jugados = retos.filter(function (r) { return r.estado === "terminado" || r.estado === "activo" || r.estado === "cancelado"; })
+      .sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
+    var programados = retos.filter(function (r) { return r.estado === "programado"; }).sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
+    var propuestas = retos.filter(function (r) { return r.estado === "propuesto" && new Date(r.propuesta_expira) > now; });
+    var tb = tabla(jugados), top = tb.filas.slice(0, 3);
+    var miReto = me && retos.filter(function (r) { return r.creado_por === me.id && r.estado !== "propuesto"; })[0];
+    var miProp = me && propuestas.filter(function (r) { return r.creado_por === me.id; })[0];
+    var sinReto = parts.filter(function (id) { return !retos.some(function (r) { return r.creado_por === id && r.estado !== "propuesto"; }); });
+
+    var podium = top.length ? '<div class="podium">' + [1, 0, 2].map(function (i) {
+      var f = top[i]; if (!f) return '<div class="step empty"></div>';
+      var u = user(f.id);
+      return '<div class="step p' + f.puesto + '"><div class="step-av">' + esc(u.avatar) + '</div>' +
+        '<div class="step-name">' + esc(u.nombre) + '</div><div class="step-pts">' + pts(f.pts) + '</div><div class="step-block">' + f.puesto + '</div></div>';
+    }).join("") + '</div>' : '<p class="hint">Todavía no hay puntos: ningún reto del torneo ha terminado.</p>';
+
+    return '<section class="card camp torneo">' +
+      '<div class="tag ' + (soy ? "live" : "") + '">' + (soy ? "Participas" : "Torneo") + '</div>' +
+      '<h2>🏆 ' + esc(t.nombre) + '</h2>' +
+      '<p class="sub">' + parts.length + ' participantes · ' + jugados.filter(function (r) { return r.estado === "terminado"; }).length + ' retos terminados · ' +
+        sinReto.length + ' aún sin reto</p>' +
+      '<div class="parts-row">' + parts.map(function (id) { var u = user(id); return '<span title="' + esc(u.nombre) + '">' + esc(u.avatar) + '</span>'; }).join("") + '</div>' +
+      // reglas
+      '<details class="reglas"><summary>📜 Reglas del torneo</summary><ol>' +
+        '<li>Cada participante propone <b>1 solo reto</b> en el torneo.</li>' +
+        '<li>Solo empieza <b>1 reto por día</b>. Si un día ya tiene reto, el siguiente aprobado empieza otro día a la hora de inicio.</li>' +
+        '<li>Un reto propuesto necesita <b>' + VOTOS_TORNEO + ' votos a favor</b> de otros participantes para empezar. Si en <b>24 horas</b> no los consigue, se elimina y quien lo propuso puede proponer otro.</li>' +
+        '<li>Cada reto da 3, 2 y 1 puntos a los tres primeros. El <b>podio del torneo</b> suma los puntos de sus retos.</li></ol>' +
+        (parts.length < VOTOS_TORNEO + 1 ? '<p class="hint">⚠️ Con ' + parts.length + ' participantes ningún reto puede llegar a ' + VOTOS_TORNEO + ' votos: hacen falta al menos ' + (VOTOS_TORNEO + 1) + '.</p>' : "") +
+        '</details>' +
+      waButton(textoReglas(t), "Compartir reglas por WhatsApp", "small ghost-wa") +
+      // mi situación
+      (soy ? '<div class="mi-torneo">' + (miReto ? 'Tu reto en este torneo: <b>' + esc(miReto.emoji + " " + miReto.que_buscar) + '</b> (' + ESTADOS[miReto.estado].toLowerCase() + ').'
+        : miProp ? 'Tu propuesta <b>' + esc(miProp.emoji + " " + miProp.que_buscar) + '</b> está en votación.'
+        : '<button class="btn primary wide" data-proponer="' + t.id + '">+ Proponer mi reto</button>') + '</div>' : "") +
+      // propuestas en votación
+      (propuestas.length ? '<h3>🗳️ Propuestas en votación</h3><ul class="propuestas">' + propuestas.map(function (r) {
+        var vs = votosDeReto(r.id), n = vs.length, mio = me && vs.some(function (v) { return v.usuario_id === me.id; }), autor = user(r.creado_por);
+        var dur = DURATIONS.filter(function (d) { return d.min === r.duracion_min; })[0];
+        return '<li><div class="prop-head"><span class="reto-emoji">' + esc(r.emoji) + '</span><div><b>' + r.meta + ' fotos · ' + esc(r.que_buscar) + '</b>' +
+          '<small>Propone ' + esc(autor.nombre) + ' · juez ' + esc(user(juezDe(r)).nombre) + ' · dura ' + (dur ? dur.label : r.duracion_min + ' min') + '</small></div></div>' +
+          '<div class="pueblo-bar"><i style="width:' + Math.min(100, n / VOTOS_TORNEO * 100) + '%"></i></div>' +
+          '<small>' + n + ' / ' + VOTOS_TORNEO + ' votos a favor · se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega</small>' +
+          (soy && me && r.creado_por !== me.id ? '<button class="btn small vote' + (mio ? " on" : "") + '" data-apoyo="' + r.id + '" data-v="' + (mio ? 0 : 1) + '">' + (mio ? "✓ Lo apoyas · quitar" : "👍 Apoyar este reto") + '</button>' : "") +
+          (me && r.creado_por === me.id ? '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") + '</li>';
+      }).join("") + '</ul>' : "") +
+      // programados y jugados
+      (programados.length ? '<h3>📅 Programados</h3><ul class="camp-retos">' + programados.map(function (r) {
+        return '<li><span class="hist-item"><span>' + esc(r.emoji + " " + r.que_buscar) + '<small>Empieza ' + fmtDate(r.inicia_en) + '</small></span><span>Programado</span></span></li>';
+      }).join("") + '</ul>' : "") +
+      '<h3>Podio</h3>' + podium +
+      (tb.filas.length ? '<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th>' +
+        jugados.map(function (r, i) { return '<th title="' + esc(r.que_buscar) + '">R' + (i + 1) + '</th>'; }).join("") +
+        '<th>Total</th></tr></thead><tbody>' + tb.filas.map(function (f) {
+          var u = user(f.id);
+          return '<tr' + (me && f.id === me.id ? ' class="is-me"' : "") + '><td>' + f.puesto + '</td><td class="pl">' + esc(u.avatar + " " + u.nombre) + '</td>' +
+            jugados.map(function (r) { return '<td>' + (r.id in f.por ? f.por[r.id] : (r.estado === "activo" ? "·" : "–")) + '</td>'; }).join("") +
+            '<td class="tot">' + f.pts + '</td></tr>';
+        }).join("") + '</tbody></table></div>' : "") +
+      (jugados.length ? '<ul class="camp-retos">' + jugados.map(function (r, i) {
+        var w = r.ganador_id ? user(r.ganador_id) : null;
+        return '<li><button class="hist-item" data-reto="' + r.id + '"><span><b>R' + (i + 1) + '</b> ' + esc(r.emoji + " " + r.que_buscar) +
+          '<small>' + fmtDate(r.inicia_en) + ' · de ' + esc(user(r.creado_por).nombre) + '</small></span><span>' +
+          (r.estado === "activo" ? "En marcha" : r.estado === "cancelado" ? "Cancelado" : w ? "Ganó " + esc(w.nombre) : "Sin ganador") + ' ›</span></button></li>';
+      }).join("") + '</ul>' : "") +
+      (tb.filas.length ? waButton(textoPodio(t, tb), "Compartir podio por WhatsApp", "wide ghost-wa") : "") +
+      '</section>';
+  }
+
+  function bindTorneos() {
     $app.querySelectorAll("[data-reto]").forEach(function (b) {
       b.onclick = function () { view = "retos"; sel = b.dataset.reto; creating = false; reload(); render(); window.scrollTo(0, 0); };
+    });
+    $app.querySelectorAll("[data-proponer]").forEach(function (b) {
+      b.onclick = function () {
+        var hz = horario();
+        if (!hz.abierto) return toast("Solo se pueden proponer retos de " + hz.rango + " (hora de " + hz.zona + "). Ahora son las " + hz.ahora + ".", 5000);
+        draft.torneo = b.dataset.proponer; draft.juez = null; view = "retos"; sel = null; creating = true; render(); window.scrollTo(0, 0);
+      };
+    });
+    $app.querySelectorAll("[data-apoyo]").forEach(function (b) {
+      b.onclick = function () {
+        guard(async function () {
+          var res = must(await db.rpc("votar_propuesta", { p_token: token, p_reto: b.dataset.apoyo, p_si: b.dataset.v === "1" }));
+          if (res.aprobado) {
+            toast(res.estado === "activo" ? "🎉 ¡Reto aprobado! Empieza ahora." : "🎉 ¡Reto aprobado! Empieza el " + fmtDate(res.inicia_en) + " (1 reto por día).", 5000);
+            confetti();
+          } else toast("🗳️ " + res.votos + " / " + VOTOS_TORNEO + " votos a favor");
+          await reload();
+        });
+      };
+    });
+    $app.querySelectorAll("[data-retirar]").forEach(function (b) {
+      b.onclick = function () {
+        if (!confirm("¿Retirar tu propuesta? Podrás proponer otro reto.")) return;
+        guard(async function () { must(await db.rpc("retirar_propuesta", { p_token: token, p_reto: b.dataset.retirar })); toast("Propuesta retirada"); await reload(); });
+      };
     });
   }
 
@@ -1582,69 +1698,68 @@
     };
   }
 
-  function renderCampAdmin() {
+  function renderCampAdmin() {   // sección "Torneos" del administrador
     var f = campForm;
-    var html = '<section class="card admin" id="campSection"><h2>Campeonatos</h2>' +
-      '<p class="hint">Junta varios retos en un campeonato: se suman sus puntos y sale un podio con su campeón (pestaña Podio).</p>';
+    var html = '<section class="card admin" id="campSection"><h2>Torneos</h2>' +
+      '<p class="hint">Crea un torneo con su nombre y sus participantes. Ellos proponen sus retos (1 por participante, 1 reto por día, ' + VOTOS_TORNEO + ' votos para empezar) y el podio suma los puntos del torneo.</p>';
     if (f) {
       html += '<form id="campForm" class="stack-form camp-form">' +
-        '<label class="label" for="campName">' + (f.id ? "Editar campeonato" : "Nuevo campeonato") + '</label>' +
-        '<input id="campName" maxlength="60" placeholder="Ej: Campeonato de noviembre" required value="' + esc(f.nombre) + '">' +
-        '<p class="label">Retos que suman puntos</p>' +
-        (data.retos.length ? '<ul class="check-list" id="campRetos">' + data.retos.map(function (r) {
-          var on = f.retos.indexOf(r.id) >= 0;
-          var n = r.para_todos !== false ? "todos" : competidores(r).length + " participantes";
-          return '<li><label class="check' + (on ? " on" : "") + '"><input type="checkbox" value="' + r.id + '"' + (on ? " checked" : "") + '>' +
-            '<span><b>' + esc(r.emoji + " " + r.que_buscar) + '</b><small>' + ESTADOS[r.estado] + ' · ' + fmtDate(r.inicia_en) + ' · ' + n + '</small></span></label></li>';
-        }).join("") + '</ul>' : '<p class="hint">Todavía no hay retos.</p>') +
+        '<label class="label" for="campName">' + (f.id ? "Editar torneo" : "Nuevo torneo") + '</label>' +
+        '<input id="campName" maxlength="60" placeholder="Ej: Torneo de noviembre" required value="' + esc(f.nombre) + '">' +
+        '<p class="label">Participantes <span class="muted">(' + f.parts.length + ' elegidos; mínimo ' + (VOTOS_TORNEO + 1) + ' para que los retos puedan llegar a ' + VOTOS_TORNEO + ' votos)</span></p>' +
+        '<div class="row"><button type="button" class="btn small ghost" id="campAll">Todos</button><button type="button" class="btn small ghost" id="campNone">Ninguno</button></div>' +
+        '<ul class="check-list" id="campParts">' + data.usuarios.map(function (u) {
+          var on = f.parts.indexOf(u.id) >= 0;
+          return '<li><label class="check' + (on ? " on" : "") + '"><input type="checkbox" value="' + u.id + '"' + (on ? " checked" : "") + '>' +
+            '<span><b>' + esc(u.avatar + " " + u.nombre) + '</b><small>@' + esc(u.usuario) + '</small></span></label></li>';
+        }).join("") + '</ul>' +
         '<div class="row"><button type="button" class="btn ghost" id="campCancel">Cancelar</button>' +
-        '<button class="btn primary">' + (f.id ? "Guardar cambios" : "Crear campeonato") + '</button></div></form>';
+        '<button class="btn primary">' + (f.id ? "Guardar cambios" : "Crear torneo") + '</button></div></form>';
     } else {
-      html += (data.campeonatos.length ? '<ul class="admin-list">' + data.campeonatos.map(function (c) {
-        var t = tabla(c);
-        return '<li><div class="admin-info"><b>' + esc(c.nombre) + '</b><small>' + t.retos.length + ' retos · ' +
-          (t.final ? "terminado" : t.terminados + " terminados") + '</small></div><div class="admin-actions">' +
-          '<button class="btn small" data-camp="edit" data-id="' + c.id + '">Editar</button>' +
-          '<button class="btn small danger" data-camp="del" data-id="' + c.id + '">Eliminar</button></div></li>';
+      html += ((data.torneos || []).length ? '<ul class="admin-list">' + data.torneos.map(function (t) {
+        var rs = retosDeTorneo(t.id);
+        return '<li><div class="admin-info"><b>🏆 ' + esc(t.nombre) + '</b><small>' + partsDe(t.id).length + ' participantes · ' +
+          rs.filter(function (r) { return r.estado !== "propuesto"; }).length + ' retos · ' + rs.filter(function (r) { return r.estado === "propuesto"; }).length + ' en votación</small></div>' +
+          '<div class="admin-actions"><button class="btn small" data-camp="edit" data-id="' + t.id + '">Editar</button>' +
+          '<button class="btn small danger" data-camp="del" data-id="' + t.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : "") +
-      '<button class="btn wide" id="campNew">+ Crear campeonato</button>';
+      '<button class="btn wide" id="campNew">+ Crear torneo</button>';
     }
     return html + '</section>';
   }
 
   function bindCampAdmin() {
-    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", retos: [] }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
+    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", parts: [] }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
     $app.querySelectorAll("[data-camp]").forEach(function (b) {
       b.onclick = function () {
-        var c = data.campeonatos.filter(function (x) { return x.id === b.dataset.id; })[0];
-        if (!c) return;
-        if (b.dataset.camp === "edit") {
-          campForm = { id: c.id, nombre: c.nombre, retos: retosDeCamp(c).map(function (r) { return r.id; }) };
-          renderAdmin(); el("campSection").scrollIntoView(); return;
-        }
-        if (!confirm("¿Eliminar el campeonato «" + c.nombre + "»? Los retos no se borran.")) return;
+        var t = torneoById(b.dataset.id); if (!t) return;
+        if (b.dataset.camp === "edit") { campForm = { id: t.id, nombre: t.nombre, parts: partsDe(t.id) }; renderAdmin(); el("campSection").scrollIntoView(); return; }
+        if (!confirm("¿Eliminar el torneo «" + t.nombre + "»? Se borran sus propuestas y retos programados; los retos ya jugados quedan como retos libres.")) return;
         guard(async function () {
-          must(await db.rpc("admin_eliminar_campeonato", { p_clave: adminClave, p_id: c.id }));
-          toast("Campeonato eliminado"); await reload();
+          must(await db.rpc("admin_eliminar_torneo", { p_clave: adminClave, p_id: t.id }));
+          toast("Torneo eliminado"); await reload();
         });
       };
     });
     if (!el("campForm")) return;
     el("campName").oninput = function () { campForm.nombre = this.value; };
-    if (el("campRetos")) el("campRetos").onchange = function (e) {
+    function marcar(ids) { campForm.parts = ids; renderAdmin(); el("campSection").scrollIntoView(); }
+    el("campAll").onclick = function () { marcar(data.usuarios.map(function (u) { return u.id; })); };
+    el("campNone").onclick = function () { marcar([]); };
+    el("campParts").onchange = function (e) {
       var cb = e.target; if (cb.type !== "checkbox") return;
-      var i = campForm.retos.indexOf(cb.value);
-      if (cb.checked && i < 0) campForm.retos.push(cb.value);
-      if (!cb.checked && i >= 0) campForm.retos.splice(i, 1);
+      var i = campForm.parts.indexOf(cb.value);
+      if (cb.checked && i < 0) campForm.parts.push(cb.value);
+      if (!cb.checked && i >= 0) campForm.parts.splice(i, 1);
       cb.closest(".check").classList.toggle("on", cb.checked);
     };
     el("campCancel").onclick = function () { campForm = null; renderAdmin(); };
     el("campForm").onsubmit = function (e) {
       e.preventDefault();
-      if (!campForm.retos.length) return toast(ERRORS.campeonato_sin_retos);
+      if (campForm.parts.length < 2) return toast(ERRORS.pocos_participantes);
       guard(async function () {
-        must(await db.rpc("admin_guardar_campeonato", { p_clave: adminClave, p_id: campForm.id, p_nombre: campForm.nombre, p_retos: campForm.retos }));
-        toast(campForm.id ? "Campeonato guardado" : "Campeonato creado");
+        must(await db.rpc("admin_guardar_torneo", { p_clave: adminClave, p_id: campForm.id, p_nombre: campForm.nombre, p_participantes: campForm.parts }));
+        toast(campForm.id ? "Torneo guardado" : "Torneo creado");
         campForm = null; await reload(); renderAdmin();
       });
     };

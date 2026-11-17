@@ -13,9 +13,11 @@ Tres módulos (pestañas abajo de la cabecera):
   para avisar al juez. Fotos solo en el momento, con la cámara del juego.
 - **Avisos por WhatsApp:** al crear un reto aparece «Avisar por WhatsApp» con el mensaje ya escrito (reto, juez,
   participantes, hora de fin y enlace directo al reto). También se puede recordar un reto en marcha y compartir el resultado.
-- **🏆 Podio:** el administrador crea campeonatos juntando varios retos (por ejemplo, el 1 y el 3). Se suman los puntos
-  de esos retos y sale un podio con el campeón. Desempate: más retos ganados y luego más fotos aceptadas; si sigue el
-  empate, se muestra como empate en el primer puesto.
+- **🏆 Torneos:** el administrador crea un torneo con su nombre y sus participantes. Reglas (se ven en la app y se
+  comparten por WhatsApp): 1) cada participante propone **1 solo reto**; 2) solo empieza **1 reto por día** (si el día ya
+  tiene reto, el aprobado se programa para el siguiente día libre a la hora de inicio); 3) un reto propuesto necesita
+  **5 votos a favor** de otros participantes para empezar; si en 24 horas no los tiene se elimina y su autor puede
+  proponer otro; 4) **podio por torneo** con la suma de puntos de sus retos.
 - **⏰ Regla de horario:** los retos solo se pueden crear de 8:00 a 18:00 (hora de Colombia al principio). Fuera de ese
   horario el botón «Crear reto» se bloquea y la base de datos también lo impide. Los retos en marcha no se ven afectados.
   El administrador puede cambiar las horas y la zona horaria en «Reglas».
