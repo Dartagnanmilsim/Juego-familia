@@ -20,10 +20,12 @@
 --                     administrador puede cambiar las horas y la zona horaria.
 --    Almacenamiento -> al borrar retos, usuarios o fotos, la función de servidor
 --                     "limpiar-fotos" (supabase/functions) borra también los archivos.
---    Calabozo      -> el juez de un reto (a sus jugadores, hasta 7 días) o el
---                     administrador (a cualquiera, hasta 30 días) puede encarcelar
---                     a un jugador: mientras dure no puede hacer fotos, marcarlas,
---                     denunciar ni crear retos.
+--    Calabozo      -> el juez de un reto (hasta 7 días) o el administrador (hasta
+--                     30 días) puede encarcelar a un jugador EN UN RETO: mientras dure
+--                     no puede hacer fotos, marcarlas ni denunciar en ese reto; en los
+--                     demás retos juega normal.
+--                     Libertad por el pueblo: el preso puede pedir una votación (una
+--                     vez por condena, dura 1 hora); con 5 votos a favor sale libre.
 --    Administrador -> entra con su clave (al principio 1234) y puede eliminar
 --                     usuarios y retos, y restablecer claves.
 --
@@ -145,6 +147,23 @@ create table if not exists public.presos (
   liberado_en  timestamptz
 );
 create index if not exists presos_usuario_idx on public.presos(usuario_id, hasta desc);
+alter table public.presos add column if not exists votacion_inicio timestamptz;
+alter table public.presos add column if not exists votacion_fin timestamptz;
+alter table public.presos add column if not exists liberado_por text;
+alter table public.presos drop constraint if exists presos_liberado_por_check;
+alter table public.presos add constraint presos_liberado_por_check check (liberado_por is null or liberado_por in ('juez', 'admin', 'pueblo', 'anulada'));
+-- Las condenas antiguas sin reto (eran para todo el juego) quedan anuladas.
+update public.presos set liberado_en = now(), liberado_por = 'anulada'
+ where reto_id is null and liberado_en is null and hasta > now();
+
+-- Votos del pueblo para liberar a un preso (uno por persona; se puede cambiar mientras está abierta)
+create table if not exists public.votos_presos (
+  preso_id   uuid not null references public.presos(id) on delete cascade,
+  usuario_id uuid not null references public.usuarios(id) on delete cascade,
+  a_favor    boolean not null,
+  creado_en  timestamptz not null default now(),
+  primary key (preso_id, usuario_id)
+);
 
 create table if not exists public.puntajes (
   reto_id    uuid not null references public.retos(id) on delete cascade,
@@ -172,6 +191,7 @@ alter table public.participantes enable row level security;
 alter table public.campeonatos enable row level security;
 alter table public.campeonato_retos enable row level security;
 alter table public.presos enable row level security;
+alter table public.votos_presos enable row level security;
 
 drop policy if exists "leer usuarios" on public.usuarios;
 drop policy if exists "leer retos"    on public.retos;
@@ -182,6 +202,7 @@ drop policy if exists "leer participantes" on public.participantes;
 drop policy if exists "leer campeonatos" on public.campeonatos;
 drop policy if exists "leer campeonato_retos" on public.campeonato_retos;
 drop policy if exists "leer presos" on public.presos;
+drop policy if exists "leer votos_presos" on public.votos_presos;
 create policy "leer usuarios" on public.usuarios for select to anon, authenticated using (true);
 create policy "leer retos"    on public.retos    for select to anon, authenticated using (true);
 create policy "leer fotos"    on public.fotos    for select to anon, authenticated using (true);
@@ -191,11 +212,12 @@ create policy "leer participantes" on public.participantes for select to anon, a
 create policy "leer campeonatos" on public.campeonatos for select to anon, authenticated using (true);
 create policy "leer campeonato_retos" on public.campeonato_retos for select to anon, authenticated using (true);
 create policy "leer presos" on public.presos for select to anon, authenticated using (true);
+create policy "leer votos_presos" on public.votos_presos for select to anon, authenticated using (true);
 
 grant select on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes,
-  public.campeonatos, public.campeonato_retos, public.presos to anon, authenticated;
+  public.campeonatos, public.campeonato_retos, public.presos, public.votos_presos to anon, authenticated;
 revoke insert, update, delete on public.usuarios, public.retos, public.fotos, public.puntajes, public.votos, public.participantes,
-  public.campeonatos, public.campeonato_retos, public.presos from anon, authenticated;
+  public.campeonatos, public.campeonato_retos, public.presos, public.votos_presos from anon, authenticated;
 revoke all on public.credenciales, public.sesiones, public.admin_config from anon, authenticated;
 
 -- ------------------------------------------------------ funciones internas
@@ -325,13 +347,14 @@ begin
   end loop;
 end $$;
 
--- ¿Está este usuario en el calabozo ahora mismo?
-create or replace function public._esta_preso(p_usuario uuid)
+-- ¿Está este usuario en el calabozo en este reto ahora mismo?
+drop function if exists public._esta_preso(uuid);
+create or replace function public._esta_preso(p_usuario uuid, p_reto uuid)
 returns boolean language sql security definer set search_path = public as $$
   select exists (select 1 from public.presos
-                  where usuario_id = p_usuario and liberado_en is null and hasta > now());
+                  where usuario_id = p_usuario and reto_id = p_reto and liberado_en is null and hasta > now());
 $$;
-revoke all on function public._esta_preso(uuid) from public, anon, authenticated;
+revoke all on function public._esta_preso(uuid, uuid) from public, anon, authenticated;
 
 -- Reglas del juego para la app: horario de creación de retos y si ahora está abierto.
 create or replace function public.reglas_juego()
@@ -378,7 +401,6 @@ declare v uuid := public._usuario_de(p_token); r public.retos; v_juez uuid := co
         v_todos boolean := coalesce(p_para_todos, true); n int;
 begin
   if p_minutos is null or p_minutos < 1 or p_minutos > 60 * 24 * 30 then raise exception 'duracion_invalida'; end if;
-  if public._esta_preso(v) then raise exception 'estas_preso'; end if;
   if not coalesce((public.reglas_juego()->>'abierto')::boolean, true) then raise exception 'fuera_de_horario'; end if;
   if not exists (select 1 from public.usuarios where id = v_juez) then raise exception 'juez_no_existe'; end if;
   if not v_todos then
@@ -411,7 +433,7 @@ begin
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
   if v = coalesce(r.juez_id, r.creado_por) then raise exception 'el_juez_no_compite'; end if;
   if not public._compite(p_reto, v) then raise exception 'no_participas'; end if;
-  if public._esta_preso(v) then raise exception 'estas_preso'; end if;
+  if public._esta_preso(v, p_reto) then raise exception 'estas_preso'; end if;
   insert into public.fotos (reto_id, usuario_id, ruta) values (p_reto, v, p_ruta);
   select count(*), count(*) filter (where estado = 'aceptada') into n, a
     from public.fotos where reto_id = p_reto and usuario_id = v;
@@ -430,7 +452,7 @@ begin
   if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
   if f.usuario_id = v then raise exception 'no_puedes_votar_tu_foto'; end if;
   if not public._compite(f.reto_id, v) then raise exception 'no_participas'; end if;
-  if public._esta_preso(v) then raise exception 'estas_preso'; end if;
+  if public._esta_preso(v, f.reto_id) then raise exception 'estas_preso'; end if;
   if p_tipo is null then
     delete from public.votos where foto_id = p_foto and usuario_id = v;
   elsif p_tipo = 'acepta' then
@@ -555,8 +577,10 @@ begin
   if not exists (select 1 from public.usuarios where id = p_usuario) then raise exception 'usuario_no_existe'; end if;
   if m = '' then raise exception 'falta_motivo'; end if;
   if char_length(m) > 200 then raise exception 'motivo_largo'; end if;
-  -- una condena nueva sustituye a la que tenga ahora
-  update public.presos set liberado_en = now() where usuario_id = p_usuario and liberado_en is null and hasta > now();
+  if p_reto is null then raise exception 'reto_no_existe'; end if;
+  -- una condena nueva en este reto sustituye a la que tenga en el mismo reto
+  update public.presos set liberado_en = now(), liberado_por = 'anulada'
+   where usuario_id = p_usuario and reto_id = p_reto and liberado_en is null and hasta > now();
   insert into public.presos (usuario_id, motivo, hasta, por_juez, reto_id)
   values (p_usuario, m, now() + make_interval(hours => p_horas), p_juez, p_reto) returning * into x;
   return x;
@@ -577,13 +601,19 @@ begin
   return public._encarcelar(p_usuario, p_horas, p_motivo, v, p_reto);
 end $$;
 
--- El administrador encarcela a cualquier jugador (máximo 30 días).
-create or replace function public.admin_encarcelar(p_clave text, p_usuario uuid, p_horas int, p_motivo text)
+-- El administrador encarcela a un jugador en un reto en marcha donde juega (máximo 30 días).
+drop function if exists public.admin_encarcelar(text, uuid, int, text);
+create or replace function public.admin_encarcelar(p_clave text, p_reto uuid, p_usuario uuid, p_horas int, p_motivo text)
 returns public.presos language plpgsql security definer set search_path = public as $$
+declare r public.retos;
 begin
   perform public._admin_ok(p_clave);
+  select * into r from public.retos where id = p_reto;
+  if r.id is null then raise exception 'reto_no_existe'; end if;
+  if r.estado <> 'activo' then raise exception 'reto_cerrado'; end if;
+  if not public._compite(p_reto, p_usuario) then raise exception 'no_participas'; end if;
   if p_horas is null or p_horas < 1 or p_horas > 24 * 30 then raise exception 'condena_invalida'; end if;
-  return public._encarcelar(p_usuario, p_horas, p_motivo, null, null);
+  return public._encarcelar(p_usuario, p_horas, p_motivo, null, p_reto);
 end $$;
 
 -- Libertad anticipada: el juez que lo encarceló...
@@ -591,7 +621,7 @@ create or replace function public.juez_liberar(p_token uuid, p_preso uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v uuid := public._usuario_de(p_token);
 begin
-  update public.presos set liberado_en = now()
+  update public.presos set liberado_en = now(), liberado_por = 'juez'
    where id = p_preso and liberado_en is null and por_juez = v;
   if not found then raise exception 'solo_quien_encarcelo'; end if;
 end $$;
@@ -601,7 +631,44 @@ create or replace function public.admin_liberar(p_clave text, p_preso uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public._admin_ok(p_clave);
-  update public.presos set liberado_en = now() where id = p_preso and liberado_en is null;
+  update public.presos set liberado_en = now(), liberado_por = 'admin' where id = p_preso and liberado_en is null;
+end $$;
+
+-- Libertad por el pueblo: el preso abre una votación (una vez por condena; dura 1 hora
+-- o hasta que acabe la condena si falta menos).
+create or replace function public.pedir_indulto(p_token uuid, p_preso uuid)
+returns public.presos language plpgsql security definer set search_path = public as $$
+declare v uuid := public._usuario_de(p_token); x public.presos;
+begin
+  select * into x from public.presos where id = p_preso for update;
+  if x.id is null or x.usuario_id <> v then raise exception 'solo_el_preso'; end if;
+  if x.liberado_en is not null or x.hasta <= now() then raise exception 'ya_libre'; end if;
+  if x.votacion_inicio is not null then raise exception 'ya_pediste_votacion'; end if;
+  update public.presos set votacion_inicio = now(), votacion_fin = least(now() + interval '1 hour', hasta)
+   where id = p_preso returning * into x;
+  return x;
+end $$;
+
+-- Votar en la votación de un preso. Con 5 votos a favor sale libre al momento.
+create or replace function public.votar_indulto(p_token uuid, p_preso uuid, p_a_favor boolean)
+returns json language plpgsql security definer set search_path = public as $$
+declare v uuid := public._usuario_de(p_token); x public.presos; si int; no int;
+begin
+  select * into x from public.presos where id = p_preso for update;   -- de uno en uno
+  if x.id is null then raise exception 'preso_no_existe'; end if;
+  if x.liberado_en is not null or x.hasta <= now() then raise exception 'ya_libre'; end if;
+  if x.votacion_inicio is null or now() >= x.votacion_fin then raise exception 'votacion_cerrada'; end if;
+  if v = x.usuario_id then raise exception 'no_puedes_votarte'; end if;
+  if v = x.por_juez then raise exception 'el_juez_no_vota'; end if;
+  if p_a_favor is null then raise exception 'voto_invalido'; end if;
+  insert into public.votos_presos (preso_id, usuario_id, a_favor) values (p_preso, v, p_a_favor)
+  on conflict (preso_id, usuario_id) do update set a_favor = excluded.a_favor, creado_en = now();
+  select count(*) filter (where a_favor), count(*) filter (where not a_favor) into si, no
+    from public.votos_presos where preso_id = p_preso;
+  if si >= 5 then
+    update public.presos set liberado_en = now(), liberado_por = 'pueblo' where id = p_preso;
+  end if;
+  return json_build_object('a_favor', si, 'en_contra', no, 'liberado', si >= 5);
 end $$;
 
 -- Archivos de fotos que ya no pertenecen a ninguna foto del juego (retos o usuarios borrados).
@@ -663,7 +730,9 @@ grant execute on function
   public.admin_guardar_reglas(text, int, int, text),
   public.admin_almacenamiento(text),
   public.juez_encarcelar(uuid, uuid, uuid, int, text),
-  public.admin_encarcelar(text, uuid, int, text),
+  public.admin_encarcelar(text, uuid, uuid, int, text),
+  public.pedir_indulto(uuid, uuid),
+  public.votar_indulto(uuid, uuid, boolean),
   public.juez_liberar(uuid, uuid),
   public.admin_liberar(text, uuid)
 to anon, authenticated;
@@ -672,7 +741,7 @@ to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos', 'participantes', 'campeonatos', 'campeonato_retos', 'presos'] loop
+  foreach t in array array['usuarios', 'retos', 'fotos', 'puntajes', 'votos', 'participantes', 'campeonatos', 'campeonato_retos', 'presos', 'votos_presos'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

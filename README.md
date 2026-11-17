@@ -26,10 +26,11 @@ Tres módulos (pestañas abajo de la cabecera):
 - **Almacenamiento:** al eliminar un reto, un usuario o una foto se borran también los archivos de las fotos, con la
   función de servidor `supabase/functions/limpiar-fotos` (Supabase Edge Function). El panel del administrador muestra
   cuánto ocupan las fotos y permite borrar las fotos sin usar.
-- **🚔 Calabozo:** el juez de un reto (a sus jugadores, hasta 1 semana) o el administrador (a cualquiera, hasta 30 días)
-  puede mandar a alguien al calabozo con un delito obligatorio. El preso sale con su avatar tras las rejas y esposas, con
-  cuenta atrás, y no puede hacer fotos, marcarlas, denunciar ni crear retos hasta que salga. Libertad anticipada: el
-  administrador o el juez que lo encarceló.
+- **🚔 Calabozo:** el juez de un reto (hasta 1 semana) o el administrador (hasta 30 días) puede mandar a alguien al
+  calabozo **en un reto concreto**, con un delito obligatorio. En ese reto no puede hacer fotos, marcarlas ni denunciar;
+  en los demás juega normal. Libertad anticipada: el administrador o el juez que lo encarceló.
+- **🗳️ Libertad por el pueblo:** el preso puede poner su caso a votación una vez por condena (dura 1 hora). Votan todos
+  menos el preso y quien lo encarceló. Con 5 votos a favor sale libre; si no, sigue preso.
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.

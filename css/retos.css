@@ -540,3 +540,19 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .jail-box > p { text-align: center; }
 .jail-box .label { margin: 12px 0 6px; }
 .jail-box #jailText { margin-top: 8px; }
+
+/* ---------- Calabozo por reto y libertad por el pueblo ---------- */
+.role.jail { background: #2b2f36; color: #fff; }
+.pueblo { display: grid; gap: 6px; margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-align: left; }
+.pueblo b { font-size: 14px; }
+.pueblo small { color: var(--muted); font-size: 12px; }
+.pueblo.cerrada { background: var(--surface-2); }
+.pueblo-bar { height: 8px; border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.pueblo-bar i { display: block; height: 100%; background: var(--ok); border-radius: 8px; transition: width 0.4s; }
+.pueblo-votos { display: flex; gap: 6px; flex-wrap: wrap; }
+.pueblo .btn.small { justify-self: start; }
+.btn.dark { background: var(--ink); color: var(--surface); }
+.mis-condenas { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; text-align: left; }
+.mis-condenas li { display: grid; gap: 2px; padding: 10px; border-radius: 12px; background: var(--surface); }
+.mis-condenas small { color: var(--muted); font-size: 12px; }
+.link-btn { border: none; background: none; padding: 0 0 0 4px; color: var(--accent); font-weight: 700; font-size: 12px; text-decoration: underline; cursor: pointer; }
