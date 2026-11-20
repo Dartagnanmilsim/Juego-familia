@@ -40,6 +40,9 @@
     duracion_invalida: "Elige una duración válida.",
     usuario_no_existe: "Ese usuario ya no existe.",
     reto_no_existe: "Ese reto ya no existe.",
+    no_editable: "Ese reto ya no se puede editar.",
+    no_eres_creador: "Solo quien creó el reto (o el administrador) puede cambiar su duración.",
+    duracion_ya_pasada: "Con esa duración el reto ya habría terminado: elige una más larga.",
     campeonato_sin_retos: "Elige al menos un reto para el campeonato.",
     campeonato_no_existe: "Ese campeonato ya no existe.",
     nombre_invalido: "Escribe un nombre (máximo 60 caracteres).",
@@ -560,9 +563,42 @@
         : '<span class="muted">Ninguno todavía</span>')] : null,
       ["👥 Compiten (" + comp.length + ")", '<div class="ficha-chips">' + nombres(comp) + '</div>']
     ].filter(Boolean);
-    return '<details class="ficha"' + (abierta ? " open" : "") + '><summary>⚙️ Configuración del reto</summary><dl>' +
-      filas.map(function (f) { return '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>'; }).join("") + '</dl></details>';
+    return '<details class="ficha"' + (abierta || editDur === r.id ? " open" : "") + '><summary>⚙️ Configuración del reto</summary><dl>' +
+      filas.map(function (f) { return '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>'; }).join("") + '</dl>' +
+      (puedoEditarDur(r) ? editorDuracion(r) : "") + '</details>';
   }
+  // ---- Editor de duración (lo único editable de un reto de torneo)
+  var editDur = null, durDraft = null;
+  function puedoEditarDur(r) { return !!(r.torneo_id && me && r.creado_por === me.id && (r.estado === "propuesto" || r.estado === "programado")); }
+  function minutosDe(r) { return r.duracion_min || Math.round((new Date(r.termina_en) - new Date(r.inicia_en)) / 60000); }
+  function editorDuracion(r, admin) {
+    if (editDur !== r.id) return '<button class="btn small ghost dur-btn" data-dur-edit="' + r.id + '">✏️ Cambiar duración</button>';
+    var fin = new Date(new Date(r.inicia_en).getTime() + durDraft * 60000);
+    return '<div class="dur-editor"><p class="label">Nueva duración <span class="muted">(ahora: ' + duracionTxt(r) + ')</span></p>' +
+      '<div class="chips">' + DURATIONS.map(function (d) {
+        return '<button type="button" class="chip' + (d.min === durDraft ? " on" : "") + '" data-dur-set="' + d.min + '">' + d.label + '</button>';
+      }).join("") + '</div>' +
+      '<p class="hint">' + (r.estado === "propuesto" ? "Empezará cuando se apruebe con " + VOTOS_TORNEO + " votos." :
+        (r.estado === "activo" ? "En marcha desde " : "Empieza ") + fmtDate(r.inicia_en) + " y terminaría el <b>" + fmtDate(fin) + "</b>.") +
+      ' Solo cambia la duración; el resto del reto sigue igual.</p>' +
+      '<div class="row"><button type="button" class="btn ghost" data-dur-cancel="1">Cancelar</button>' +
+      '<button type="button" class="btn primary" data-dur-save="' + r.id + '"' + (admin ? ' data-admin="1"' : "") + '>Guardar duración</button></div></div>';
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-dur-edit],[data-dur-set],[data-dur-cancel],[data-dur-save]"); if (!b) return;
+    if (b.dataset.durEdit) { var r = retoById(b.dataset.durEdit); if (!r) return; editDur = r.id; durDraft = minutosDe(r); render(); return; }
+    if (b.dataset.durSet) { durDraft = Number(b.dataset.durSet); render(); return; }
+    if (b.dataset.durCancel) { editDur = null; render(); return; }
+    var id = b.dataset.durSave, min = durDraft, admin = !!b.dataset.admin;
+    guard(async function () {
+      must(admin ? await db.rpc("admin_cambiar_duracion", { p_clave: adminClave, p_reto: id, p_minutos: min })
+                 : await db.rpc("cambiar_duracion", { p_token: token, p_reto: id, p_minutos: min }));
+      var d = DURATIONS.filter(function (x) { return x.min === min; })[0];
+      toast("⏱️ Duración cambiada a " + (d ? d.label : min + " min"));
+      editDur = null; await reload(); render();
+    });
+  });
+
   function renderPendiente(r) {   // reto de torneo en votación o programado
     var vs = votosDeReto(r.id).length;
     return '<section class="card">' +
@@ -1715,7 +1751,7 @@
           '<div class="pueblo-bar"><i style="width:' + Math.min(100, n / VOTOS_TORNEO * 100) + '%"></i></div>' +
           '<small>' + n + ' / ' + VOTOS_TORNEO + ' votos a favor · se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega</small>' +
           (soy && me && r.creado_por !== me.id ? '<button class="btn small vote' + (mio ? " on" : "") + '" data-apoyo="' + r.id + '" data-v="' + (mio ? 0 : 1) + '">' + (mio ? "✓ Lo apoyas · quitar" : "👍 Apoyar este reto") + '</button>' : "") +
-          (me && r.creado_por === me.id ? waButton(textoPropuesta(r), "Pedir votos por WhatsApp", "small ghost-wa") +
+          (me && r.creado_por === me.id ? editorDuracion(r) + waButton(textoPropuesta(r), "Pedir votos por WhatsApp", "small ghost-wa") +
             '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") +
           (n ? '<small>Votaron a favor: ' + esc(vs.map(function (v) { return user(v.usuario_id).nombre; }).join(", ")) + '</small>' : "") +
           '<button class="link-btn" data-reto="' + r.id + '">Ver configuración ›</button></li>';
@@ -1954,9 +1990,21 @@
           '<div class="admin-actions"><button class="btn small" data-camp="edit" data-id="' + t.id + '">Editar</button>' +
           '<button class="btn small danger" data-camp="del" data-id="' + t.id + '">Eliminar</button></div></li>';
       }).join("") + '</ul>' : "") +
-      '<button class="btn wide" id="campNew">+ Crear torneo</button>';
+      '<button class="btn wide" id="campNew">+ Crear torneo</button>' + editorTorneosAdmin();
     }
     return html + '</section>';
+  }
+
+  function editorTorneosAdmin() {   // el administrador cambia la duración de los retos de torneo
+    var rs = data.retos.filter(function (r) { return r.torneo_id && (r.estado === "propuesto" || r.estado === "programado" || r.estado === "activo"); })
+      .sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
+    return '<h3 class="dur-title">⏱️ Duración de los retos de torneo</h3>' +
+      (rs.length ? '<ul class="dur-list">' + rs.map(function (r) {
+        return '<li><div><b>' + esc(r.emoji + " " + r.meta + " fotos · " + r.que_buscar) + '</b>' +
+          '<small>🏆 ' + esc(nombreTorneo(r.torneo_id)) + ' · ' + ESTADOS[r.estado] + ' · de ' + esc(user(r.creado_por).nombre) + ' · dura ' + duracionTxt(r) +
+          (r.estado === "propuesto" ? "" : '<br>' + fmtDate(r.inicia_en) + ' → ' + fmtDate(r.termina_en)) + '</small></div>' +
+          editorDuracion(r, true) + '</li>';
+      }).join("") + '</ul>' : '<p class="hint">No hay retos de torneo en votación, programados ni en marcha.</p>');
   }
 
   function bindCampAdmin() {

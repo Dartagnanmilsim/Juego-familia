@@ -38,6 +38,9 @@ Tres módulos (pestañas abajo de la cabecera):
   en los demás juega normal. Libertad anticipada: el administrador o el juez que lo encarceló.
 - **🗳️ Libertad por el pueblo:** el preso puede poner su caso a votación una vez por condena (dura 1 hora). Votan todos
   menos el preso y quien lo encarceló. Con 5 votos a favor sale libre; si no, sigue preso.
+- **✏️ Editar duración:** de un reto de torneo solo se puede cambiar la duración. Quien lo creó puede hacerlo mientras
+  está en votación o programado (en la ficha del reto); el administrador también cuando ya está en marcha (Admin → Torneos →
+  «Duración de los retos de torneo»).
 - **🔔 Avisos al móvil:** cada jugador toca «Activar avisos» (en Retos o Usuarios) y recibe notificaciones automáticas:
   reto propuesto en su torneo (¡a votar!), **30 minutos antes** de que empiece un reto programado, cuando empieza y cuando
   termina. Funciona en Android (Chrome) y en iPhone si el juego se añade a la pantalla de inicio. Lo envía la función de

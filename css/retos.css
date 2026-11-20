@@ -606,3 +606,15 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .recordatorios { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .recordatorios li { display: grid; gap: 6px; }
 .recordatorios small { display: block; color: var(--muted); font-size: 12px; }
+
+/* ---------- Editor de duración ---------- */
+.dur-btn { margin-top: 10px; justify-self: start; }
+.dur-editor { margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; }
+.dur-editor .label { margin: 0; }
+.dur-editor .hint { margin: 0; }
+.dur-editor .row { gap: 8px; }
+.dur-title { margin: 18px 0 8px; }
+.dur-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.dur-list > li { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.dur-list small { display: block; color: var(--muted); font-size: 12px; }
+.dur-list .dur-btn { margin-top: 0; }
