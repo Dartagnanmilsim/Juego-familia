@@ -41,6 +41,10 @@
     usuario_no_existe: "Ese usuario ya no existe.",
     reto_no_existe: "Ese reto ya no existe.",
     no_editable: "Ese reto ya no se puede editar.",
+    juez_limite: "Esa persona ya fue juez el máximo de veces permitido en este torneo. Elige otro juez.",
+    max_juez_invalido: "El máximo de veces como juez debe ser de 1 a 50 (o vacío para sin límite).",
+    juez_tiene_fotos: "Esa persona ya tiene fotos en este reto: no puede ser el juez.",
+    juez_no_existe: "Ese jugador ya no existe.",
     no_eres_creador: "Solo quien creó el reto (o el administrador) puede cambiar su duración.",
     duracion_ya_pasada: "Con esa duración el reto ya habría terminado: elige una más larga.",
     campeonato_sin_retos: "Elige al menos un reto para el campeonato.",
@@ -795,7 +799,9 @@
   function renderNewForm() {
     var tor = draft.torneo && torneoById(draft.torneo);
     var jueces = tor ? partsDe(tor.id).map(user) : data.usuarios;
+    var lleno = function (id) { return !!tor && tor.max_juez && vecesJuez(tor.id, id) >= tor.max_juez; };
     if (!draft.juez || !jueces.some(function (u) { return u.id === draft.juez; })) draft.juez = me.id;
+    if (lleno(draft.juez)) { var libre = jueces.filter(function (u) { return !lleno(u.id); })[0]; draft.juez = libre ? libre.id : null; }
     return '<button class="btn ghost back-btn" id="backList">← ' + (tor ? "Volver al torneo" : "Volver a los retos") + '</button>' +
       '<section class="card">' +
       (tor ? '<h2>Proponer mi reto</h2><p class="sub">🏆 Torneo <b>' + esc(tor.nombre) + '</b>. Tu reto necesita ' + VOTOS_TORNEO +
@@ -816,8 +822,11 @@
       }).join("") + '</div>' +
       '<p class="label">Juez <span class="muted">· acepta o elimina las fotos y no compite</span></p>' +
       '<div class="chips" id="judges">' + jueces.map(function (u) {
-        return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '">' + esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + '</button>';
+        var full = lleno(u.id);
+        return '<button type="button" class="chip' + (u.id === draft.juez ? " on" : "") + '" data-j="' + u.id + '"' + (full ? ' disabled title="Ya fue juez el máximo de veces"' : "") + '>' +
+          esc(u.avatar + " " + u.nombre) + (u.id === me.id ? " (yo)" : "") + (tor && tor.max_juez ? ' <small>' + vecesJuez(tor.id, u.id) + '/' + tor.max_juez + '</small>' : "") + '</button>';
       }).join("") + '</div>' +
+      (tor && tor.max_juez ? '<p class="hint">En este torneo cada persona puede ser juez como máximo <b>' + tor.max_juez + (tor.max_juez === 1 ? " vez" : " veces") + '</b>.</p>' : "") +
       (tor ? '<p class="label">Participantes</p><p class="hint">Compiten todos los participantes del torneo menos el juez.</p>' :
       '<p class="label">Participantes</p>' +
       '<div class="seg" id="forWho"><button type="button" data-todos="1" class="' + (draft.todos ? "on" : "") + '">Para todos</button>' +
@@ -906,7 +915,7 @@
       [].forEach.call(this.children, function (c) { c.classList.toggle("on", c === b); });
     };
     el("judges").onclick = function (e) {
-      var b = e.target.closest(".chip"); if (!b) return;
+      var b = e.target.closest(".chip"); if (!b || b.disabled) return;
       draft.juez = b.dataset.j;
       draft.parts = draft.parts.filter(function (x) { return x !== draft.juez; });
       render();   // actualiza la lista de participantes (el juez no compite)
@@ -1615,6 +1624,9 @@
     .filter(function (id) { return data.usuarios.some(function (u) { return u.id === id; }); }); }
   function soyDelTorneo(torId) { return me && partsDe(torId).indexOf(me.id) >= 0; }
   function retosDeTorneo(torId) { return data.retos.filter(function (r) { return r.torneo_id === torId; }); }
+  function vecesJuez(torId, uid) {
+    return data.retos.filter(function (r) { return r.torneo_id === torId && juezDe(r) === uid && r.estado !== "cancelado"; }).length;
+  }
   function votosDeReto(rid) { return (data.votosRetos || []).filter(function (v) { return v.reto_id === rid; }); }
   function propuestasPorVotar() {
     return data.retos.filter(function (r) {
@@ -1666,7 +1678,9 @@
       "2️⃣ Solo empieza *1 reto por día*, entre la fecha de inicio y la de fin. Si un día ya tiene reto, el siguiente aprobado empieza otro día.\n" +
       "3️⃣ Un reto propuesto necesita *" + VOTOS_TORNEO + " votos a favor* de otros participantes para empezar. Si en *24 horas* no los consigue, se elimina y quien lo propuso puede proponer otro.\n" +
       "4️⃣ Cada reto da 3, 2 y 1 puntos a los tres primeros (solo cuentan fotos aceptadas por el juez). El *podio del torneo* suma los puntos de sus retos.\n" +
-      "⚖️ *Desempate* (si hay los mismos puntos): 1) más fotos aceptadas; 2) menos denuncias recibidas.\n\n" +
+      "⚖️ *Desempate* (si hay los mismos puntos): 1) más fotos aceptadas; 2) menos denuncias recibidas.\n" +
+      (t.max_juez ? "5️⃣ Una persona puede ser *juez como máximo " + t.max_juez + (t.max_juez === 1 ? " vez" : " veces") + "* en el torneo.\n" : "") +
+      "🛡️ El administrador puede cambiar el juez, aceptar fotos y ajustar cualquier regla.\n\n" +
       "👥 Participantes (" + ps.length + "): " + ps.join(", ") + "\n\n¡A jugar! 👇\n" + location.origin + location.pathname;
   }
   function textoPodio(t, tb) {
@@ -1734,7 +1748,9 @@
         '<li>Solo empieza <b>1 reto por día</b>' + (t.inicia_el ? ', entre el ' + fmtDia(t.inicia_el) + ' y el ' + fmtDia(t.termina_el) : "") + '. Si un día ya tiene reto, el siguiente aprobado empieza otro día a la hora de inicio.</li>' +
         '<li>Un reto propuesto necesita <b>' + VOTOS_TORNEO + ' votos a favor</b> de otros participantes para empezar. Si en <b>24 horas</b> no los consigue, se elimina y quien lo propuso puede proponer otro.</li>' +
         '<li>Cada reto da 3, 2 y 1 puntos a los tres primeros. El <b>podio del torneo</b> suma los puntos de sus retos.</li>' +
-        '<li><b>Desempate</b> si hay los mismos puntos: 1) más fotos aceptadas; 2) menos denuncias recibidas.</li></ol>' +
+        '<li><b>Desempate</b> si hay los mismos puntos: 1) más fotos aceptadas; 2) menos denuncias recibidas.</li>' +
+        (t.max_juez ? '<li>Una persona puede ser <b>juez como máximo ' + t.max_juez + (t.max_juez === 1 ? " vez" : " veces") + '</b> en el torneo.</li>' : "") +
+        '<li>El <b>administrador</b> puede cambiar el juez, aceptar fotos y ajustar cualquier regla.</li></ol>' +
         (parts.length < VOTOS_TORNEO + 1 ? '<p class="hint">⚠️ Con ' + parts.length + ' participantes ningún reto puede llegar a ' + VOTOS_TORNEO + ' votos: hacen falta al menos ' + (VOTOS_TORNEO + 1) + '.</p>' : "") +
         '</details>' +
       waButton(textoReglas(t), "Compartir reglas por WhatsApp", "small ghost-wa") +
@@ -1845,12 +1861,16 @@
       '<h2>Retos</h2>' +
       '<p class="hint">Eliminar un reto lo borra con sus fotos y sus puntos (también si está en marcha).</p>' +
       (data.retos.length ? '<ul class="admin-list">' + data.retos.map(function (r) {
-        return '<li><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
-          '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · " + esc(user(r.creado_por).nombre) + '</small></div>' +
+        var abierto = r.estado === "propuesto" || r.estado === "programado" || r.estado === "activo";
+        return '<li' + (admJuez === r.id ? ' class="con-editor"' : "") + '><div class="admin-info"><b>' + esc(r.emoji) + " " + r.meta + " · " + esc(r.que_buscar) + '</b>' +
+          '<small>' + ESTADOS[r.estado] + " · " + fmtDate(r.inicia_en) + " · " + esc(user(r.creado_por).nombre) +
+          (r.torneo_id ? " · 🏆 " + esc(nombreTorneo(r.torneo_id)) : "") + '<br>⚖️ Juez: ' + esc(user(juezDe(r)).nombre) + '</small></div>' +
           '<div class="admin-actions">' +
-          '<button class="btn small danger" data-act="del-reto" data-id="' + r.id + '">Eliminar</button></div></li>';
+          (abierto ? '<button class="btn small" data-adm-juez="' + r.id + '">Juez</button>' : "") +
+          '<button class="btn small danger" data-act="del-reto" data-id="' + r.id + '">Eliminar</button></div>' +
+          (admJuez === r.id ? editorJuezAdmin(r) : "") + '</li>';
       }).join("") + '</ul>' : '<p class="hint">No hay retos.</p>') +
-      '</section>' +
+      '</section>' + fotosPorRevisarAdmin() +
       '<section class="card admin"><h2>Usuarios (' + data.usuarios.length + ')</h2>' +
       '<p class="hint">Eliminar un usuario borra también sus fotos y sus puntos.</p>' +
       (data.usuarios.length ? '<ul class="admin-list">' + data.usuarios.map(function (u) {
@@ -1876,6 +1896,8 @@
       '<button class="btn primary wide" id="admExit">Salir del administrador</button>';
 
     $app.querySelectorAll("[data-act]").forEach(function (b) { b.onclick = function () { adminAction(b.dataset.act, b.dataset.id); }; });
+    $app.querySelectorAll(".ph").forEach(function (b) { b.onclick = function () { openViewer(b.dataset.id); }; });
+    bindPoderesAdmin();
     el("admExit").onclick = exitAdmin;
     bindCampAdmin();
     bindReglasAdmin();
@@ -1888,6 +1910,60 @@
         adminClave = nueva; toast("Clave de administrador cambiada"); el("admNewForm").reset();
       });
     };
+  }
+
+  // ---- Poderes del administrador: cambiar el juez y aceptar fotos
+  var admJuez = null;
+  function editorJuezAdmin(r) {
+    var actual = juezDe(r), tor = r.torneo_id ? torneoById(r.torneo_id) : null;
+    var cand = (tor ? partsDe(tor.id).map(user) : data.usuarios).filter(function (u) { return u && u.id; });
+    var conFotos = function (id) { return data.fotos.some(function (f) { return f.reto_id === r.id && f.usuario_id === id; }); };
+    return '<div class="dur-editor juez-editor"><p class="label">Nuevo juez para «' + esc(r.que_buscar) + '»</p><div class="chips">' + cand.map(function (u) {
+      var dis = u.id === actual || conFotos(u.id);
+      return '<button type="button" class="chip' + (u.id === actual ? " on" : "") + '" data-adm-juez-set="' + u.id + '" data-reto="' + r.id + '"' + (dis ? " disabled" : "") + '>' +
+        esc(u.avatar + " " + u.nombre) + (tor && tor.max_juez ? ' <small>' + vecesJuez(tor.id, u.id) + '/' + tor.max_juez + '</small>' : "") + '</button>';
+    }).join("") + '</div><p class="hint">El nuevo juez deja de competir en este reto' + (tor ? "; el juez anterior pasa a competir" : "") +
+      '. No se puede elegir a quien ya tiene fotos en el reto. Como administrador no aplica el límite de veces como juez.</p>' +
+      '<button type="button" class="btn small ghost" data-adm-juez-cancel="1">Cancelar</button></div>';
+  }
+  function fotosPorRevisarAdmin() {
+    var pend = data.fotos.filter(function (f) { var r = retoById(f.reto_id); return f.estado !== "aceptada" && r && r.estado === "activo"; });
+    return '<section class="card admin"><h2>📷 Fotos por revisar <span class="count">' + pend.length + '</span></h2>' +
+      '<p class="hint">Como administrador puedes aceptar fotos de cualquier reto en marcha (igual que el juez). Toca la foto para verla en grande.</p>' +
+      (pend.length ? '<ul class="adm-fotos">' + pend.map(function (f) {
+        var u = user(f.usuario_id), r = retoById(f.reto_id), v = votosDe(f.id);
+        return '<li><button class="ph" data-id="' + f.id + '"><img loading="lazy" alt="" src="' + esc(photoUrl(f.ruta)) + '"></button>' +
+          '<div><b>' + esc(u.avatar + " " + u.nombre) + '</b><small>' + esc(r.emoji + " " + r.que_buscar) + ' · juez ' + esc(user(juezDe(r)).nombre) +
+          '<br>' + v.acepta + ' a favor · ' + v.denuncia + ' denuncia' + (v.denuncia === 1 ? "" : "s") + '</small>' +
+          '<button class="btn small primary" data-adm-acc="' + f.id + '">Aceptar</button></div></li>';
+      }).join("") + '</ul>' : '<p class="hint">No hay fotos pendientes en los retos en marcha.</p>') + '</section>';
+  }
+  function bindPoderesAdmin() {
+    $app.querySelectorAll("[data-adm-juez]").forEach(function (b) {
+      b.onclick = function () { admJuez = admJuez === b.dataset.admJuez ? null : b.dataset.admJuez; renderAdmin(); };
+    });
+    $app.querySelectorAll("[data-adm-juez-cancel]").forEach(function (b) { b.onclick = function () { admJuez = null; renderAdmin(); }; });
+    $app.querySelectorAll("[data-adm-juez-set]").forEach(function (b) {
+      b.onclick = function () {
+        var u = user(b.dataset.admJuezSet), r = retoById(b.dataset.reto);
+        if (!confirm("¿Poner a " + u.nombre + " como juez de «" + r.que_buscar + "»?")) return;
+        guard(async function () {
+          must(await db.rpc("admin_cambiar_juez", { p_clave: adminClave, p_reto: r.id, p_juez: u.id }));
+          admJuez = null; toast("⚖️ Nuevo juez: " + u.nombre); await reload(); renderAdmin();
+        });
+      };
+    });
+    $app.querySelectorAll("[data-adm-acc]").forEach(function (b) {
+      b.onclick = function () {
+        var f = data.fotos.filter(function (x) { return x.id === b.dataset.admAcc; })[0]; if (!f) return;
+        guard(async function () {
+          var res = must(await db.rpc("admin_aceptar_foto", { p_clave: adminClave, p_foto: f.id }));
+          toast(res.gano ? "¡" + user(f.usuario_id).nombre + " llegó a la meta y gana el reto!" : "Foto aceptada: " + user(f.usuario_id).nombre + " lleva " + res.aceptadas);
+          if (res.gano) avisarYa();
+          await reload(); renderAdmin();
+        });
+      };
+    });
   }
 
   function mb(b) { return (b / 1048576).toFixed(1).replace(".", ",") + " MB"; }
@@ -1966,6 +2042,8 @@
         '<input id="campName" maxlength="60" placeholder="Ej: Torneo de noviembre" required value="' + esc(f.nombre) + '">' +
         '<div class="row fechas"><label><span class="label">Empieza</span><input type="date" id="campIni" required value="' + esc(f.inicio) + '"></label>' +
         '<label><span class="label">Termina</span><input type="date" id="campFin" required value="' + esc(f.fin) + '"></label></div>' +
+        '<label class="label" for="campMaxJ">⚖️ Veces máximas que una persona puede ser juez <span class="muted">(vacío = sin límite)</span></label>' +
+        '<input id="campMaxJ" type="number" min="1" max="50" inputmode="numeric" placeholder="Sin límite" value="' + esc(f.maxJuez == null ? "" : f.maxJuez) + '">' +
         '<label class="label" for="campP1">🥇 Premio para el campeón</label>' +
         '<input id="campP1" maxlength="100" required placeholder="Ej: Cena en el restaurante que elija" value="' + esc(f.p1) + '">' +
         '<label class="label" for="campP2">🥈 Premio para el 2.º <span class="muted">(opcional)</span></label>' +
@@ -1985,7 +2063,7 @@
       html += ((data.torneos || []).length ? '<ul class="admin-list">' + data.torneos.map(function (t) {
         var rs = retosDeTorneo(t.id);
         return '<li><div class="admin-info"><b>🏆 ' + esc(t.nombre) + '</b><small>' + (t.inicia_el ? fechasTorneo(t) + ' · ' : "") +
-          (t.premio1 ? '🥇 ' + esc(t.premio1) + '<br>' : "") + partsDe(t.id).length + ' participantes · ' +
+          (t.premio1 ? '🥇 ' + esc(t.premio1) + '<br>' : "") + (t.max_juez ? '⚖️ juez máx. ' + t.max_juez + ' · ' : "") + partsDe(t.id).length + ' participantes · ' +
           rs.filter(function (r) { return r.estado !== "propuesto"; }).length + ' retos · ' + rs.filter(function (r) { return r.estado === "propuesto"; }).length + ' en votación</small></div>' +
           '<div class="admin-actions"><button class="btn small" data-camp="edit" data-id="' + t.id + '">Editar</button>' +
           '<button class="btn small danger" data-camp="del" data-id="' + t.id + '">Eliminar</button></div></li>';
@@ -2008,12 +2086,12 @@
   }
 
   function bindCampAdmin() {
-    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", parts: [], inicio: hoyISO(), fin: sumarDias(hoyISO(), 14), p1: "", p2: "", p3: "" }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
+    if (el("campNew")) el("campNew").onclick = function () { campForm = { id: null, nombre: "", parts: [], inicio: hoyISO(), fin: sumarDias(hoyISO(), 14), p1: "", p2: "", p3: "", maxJuez: 2 }; renderAdmin(); el("campSection").scrollIntoView(); el("campName").focus(); };
     $app.querySelectorAll("[data-camp]").forEach(function (b) {
       b.onclick = function () {
         var t = torneoById(b.dataset.id); if (!t) return;
         if (b.dataset.camp === "edit") { campForm = { id: t.id, nombre: t.nombre, parts: partsDe(t.id), inicio: t.inicia_el || hoyISO(), fin: t.termina_el || sumarDias(hoyISO(), 14),
-          p1: t.premio1 || "", p2: t.premio2 || "", p3: t.premio3 || "" }; renderAdmin(); el("campSection").scrollIntoView(); return; }
+          p1: t.premio1 || "", p2: t.premio2 || "", p3: t.premio3 || "", maxJuez: t.max_juez == null ? null : t.max_juez }; renderAdmin(); el("campSection").scrollIntoView(); return; }
         if (!confirm("¿Eliminar el torneo «" + t.nombre + "»? Se borran sus propuestas y retos programados; los retos ya jugados quedan como retos libres.")) return;
         guard(async function () {
           must(await db.rpc("admin_eliminar_torneo", { p_clave: adminClave, p_id: t.id }));
@@ -2026,6 +2104,7 @@
     [["campIni", "inicio"], ["campFin", "fin"], ["campP1", "p1"], ["campP2", "p2"], ["campP3", "p3"]].forEach(function (x) {
       el(x[0]).oninput = el(x[0]).onchange = function () { campForm[x[1]] = this.value; };
     });
+    el("campMaxJ").oninput = function () { campForm.maxJuez = this.value === "" ? null : Number(this.value); };
     function marcar(ids) { campForm.parts = ids; renderAdmin(); el("campSection").scrollIntoView(); }
     el("campAll").onclick = function () { marcar(data.usuarios.map(function (u) { return u.id; })); };
     el("campNone").onclick = function () { marcar([]); };
@@ -2044,7 +2123,8 @@
       if (!campForm.p1.trim()) return toast(ERRORS.premio_invalido);
       guard(async function () {
         must(await db.rpc("admin_guardar_torneo", { p_clave: adminClave, p_id: campForm.id, p_nombre: campForm.nombre, p_participantes: campForm.parts,
-          p_inicio: campForm.inicio, p_fin: campForm.fin, p_premio1: campForm.p1, p_premio2: campForm.p2, p_premio3: campForm.p3 }));
+          p_inicio: campForm.inicio, p_fin: campForm.fin, p_premio1: campForm.p1, p_premio2: campForm.p2, p_premio3: campForm.p3,
+          p_max_juez: campForm.maxJuez }));
         toast(campForm.id ? "Torneo guardado" : "Torneo creado");
         campForm = null; await reload(); renderAdmin();
       });

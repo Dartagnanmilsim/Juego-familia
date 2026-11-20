@@ -38,6 +38,11 @@ Tres módulos (pestañas abajo de la cabecera):
   en los demás juega normal. Libertad anticipada: el administrador o el juez que lo encarceló.
 - **🗳️ Libertad por el pueblo:** el preso puede poner su caso a votación una vez por condena (dura 1 hora). Votan todos
   menos el preso y quien lo encarceló. Con 5 votos a favor sale libre; si no, sigue preso.
+- **⚖️ Límite de juez:** en cada torneo el administrador fija cuántas veces como máximo puede ser juez una persona
+  (por defecto 2; vacío = sin límite). Al proponer un reto, quien llegó al límite aparece bloqueado.
+- **🛡️ Poderes del administrador:** puede cambiar el juez de cualquier reto que no haya terminado (sin límite de veces;
+  el nuevo juez deja de competir y, en torneos, el anterior pasa a competir) y aceptar fotos de cualquier reto en marcha
+  («📷 Fotos por revisar» en el panel), además de ajustar horario, torneos, fechas, premios y duraciones.
 - **✏️ Editar duración:** de un reto de torneo solo se puede cambiar la duración. Quien lo creó puede hacerlo mientras
   está en votación o programado (en la ficha del reto); el administrador también cuando ya está en marcha (Admin → Torneos →
   «Duración de los retos de torneo»).
