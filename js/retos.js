@@ -53,6 +53,9 @@
     votacion_cerrada: "La votación ya está cerrada.",
     no_puedes_votarte: "No puedes votar en tu propia votación.",
     pocos_participantes: "Elige al menos 2 participantes.",
+    suscripcion_invalida: "No se pudieron activar los avisos en este móvil.",
+    avisos_no_instalados: "Los avisos todavía no están instalados en el servidor.",
+    no_se_pudo_suscribir: "Este navegador no pudo activar los avisos. Prueba con Chrome (Android) o desde el icono en la pantalla de inicio (iPhone).",
     fechas_invalidas: "Revisa las fechas: el fin no puede ser antes del inicio.",
     premio_invalido: "Escribe el premio del campeón (hasta 100 caracteres).",
     torneo_terminado: "Este torneo ya terminó.",
@@ -290,7 +293,7 @@
     var pts = {}, wins = {};
     data.puntajes.forEach(function (x) { pts[x.usuario_id] = (pts[x.usuario_id] || 0) + x.puntos; if (x.puesto === 1) wins[x.usuario_id] = (wins[x.usuario_id] || 0) + 1; });
     var nu = newUser;
-    $app.innerHTML =
+    $app.innerHTML = tarjetaAvisos(true) +
       '<section class="card"><h2>Jugadores (' + data.usuarios.length + ')</h2>' +
       '<ul class="admin-list">' + data.usuarios.map(function (u) {
         return '<li' + (u.id === me.id ? ' class="is-me"' : "") + '><div class="admin-info"><b>' + esc(u.avatar) + " " + esc(u.nombre) + (u.id === me.id ? " (tú)" : "") +
@@ -383,6 +386,7 @@
         presos: r[6].error ? [] : r[6].data, votosPresos: r[7].error ? [] : r[7].data,
         torneos: r[8].error ? [] : r[8].data, torneoParts: r[9].error ? [] : r[9].data, votosRetos: r[10].error ? [] : r[10].data,
         fotos: [], votos: [], reglas: null };
+      if (!pushRevisado) { pushRevisado = true; revisarPush().then(function () { if (view === "retos" || view === "usuarios") render(); }); }
       try { var rg = await db.rpc("reglas_juego"); if (!rg.error) next.reglas = rg.data; } catch (e) {}
       var ids = next.retos.filter(function (x) { return x.estado === "activo" || x.id === sel; }).map(function (x) { return x.id; });
       var fv = await Promise.all(ids.map(function (id) {
@@ -567,7 +571,9 @@
       '<h2>' + r.meta + ' fotos de: ' + esc(r.que_buscar) + '</h2>' +
       '<p class="sub">' + (r.estado === "programado" ? "Aprobado. Empieza el <b>" + fmtDate(r.inicia_en) + "</b>."
         : "En votación: " + vs + " / " + VOTOS_TORNEO + ' votos. Se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega.') + '</p>' +
-      fichaReto(r, true) + '</section>';
+      fichaReto(r, true) +
+      waButton(r.estado === "programado" ? textoProgramado(r) : textoPropuesta(r), r.estado === "programado" ? "Avisar al grupo por WhatsApp" : "Pedir votos por WhatsApp", "wide") +
+      '</section>';
   }
 
   function rolBadge(r) {
@@ -620,7 +626,7 @@
       return pa - pb || new Date(a.termina_en) - new Date(b.termina_en);
     });
     var hz = horario();
-    return misCondenas() + (hz.abierto
+    return misCondenas() + tarjetaAvisos() + recordatoriosWA() + (hz.abierto
         ? '<button class="btn primary wide new-reto" id="newReto">+ Crear reto</button>'
         : '<div class="card closed-box"><b>Fuera del horario para crear retos</b>Los retos se crean de <b>' + hz.rango + '</b> (hora de ' + esc(hz.zona) + '). ' +
           'Ahora son las ' + hz.ahora + '. Los retos en marcha siguen igual.</div>') +
@@ -890,6 +896,7 @@
         return guard(async function () {
           must(await db.rpc("proponer_reto", { p_token: token, p_torneo: torId, p_que: draft.que, p_emoji: draft.emoji,
             p_meta: draft.meta, p_minutos: draft.min, p_juez: draft.juez }));
+          avisarYa();
           toast("🗳️ Reto propuesto. Necesita " + VOTOS_TORNEO + " votos a favor en 24 h.", 5000);
           draft.que = ""; draft.torneo = null; creating = false; sel = null; view = "podio";
           await reload(); render(); window.scrollTo(0, 0);
@@ -905,6 +912,7 @@
         say("¡Reto lanzado! Gana el primero en conseguir " + draft.meta + " fotos de " + draft.que);
         draft.que = ""; draft.parts = []; draft.todos = true;
         creating = false; sel = nuevo.id; justCreated = nuevo.id;
+        avisarYa();
         await reload();
       });
     };
@@ -926,6 +934,7 @@
     if (act === "aceptar") {
       return guard(async function () {
         var res = must(await db.rpc("juez_aceptar_foto", { p_token: token, p_foto: id }));
+        if (res.gano) avisarYa();
         toast(res.gano ? "¡" + u.nombre + " llegó a la meta y gana el reto!" : "Foto aceptada: " + u.nombre + " lleva " + res.aceptadas);
         await reload();
       });
@@ -1429,6 +1438,117 @@
     }
   }
 
+  // ============================================================ AVISOS AL MÓVIL (notificaciones push)
+  var pushRevisado = false;
+  var pushEstado = "no";        // activo | off | bloqueado | ios | no
+  function esIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); }
+  function instalada() { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch (e) { return false; } }
+  function pushSoportado() { return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; }
+  function b64u8(b64) {
+    var pad = "=".repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    var out = new Uint8Array(raw.length); for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i); return out;
+  }
+  async function guardarSuscripcion(sub) {
+    var j = sub.toJSON();
+    must(await db.rpc("push_suscribir", { p_token: token, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth }));
+  }
+  async function revisarPush() {
+    try {
+      if (esIOS() && !instalada()) { pushEstado = "ios"; return; }   // en iPhone solo funciona desde el icono de inicio
+      if (!pushSoportado()) { pushEstado = "no"; return; }
+      if (Notification.permission === "denied") { pushEstado = "bloqueado"; return; }
+      var reg = await navigator.serviceWorker.getRegistration();
+      var sub = reg && await reg.pushManager.getSubscription();
+      if (sub && Notification.permission === "granted") { pushEstado = "activo"; await guardarSuscripcion(sub); }   // por si cambió de usuario
+      else pushEstado = "off";
+    } catch (e) { pushEstado = pushSoportado() ? "off" : "no"; }
+  }
+  async function claveVapid() {
+    var r = await db.rpc("push_clave_publica");
+    if (!r.error && r.data) return r.data;
+    var f = await db.functions.invoke("avisos", { body: { accion: "clave" } });
+    if (f.error || !f.data || !f.data.publica) throw new Error("avisos_no_instalados");
+    return f.data.publica;
+  }
+  async function activarPush() {
+    if (!pushSoportado()) { pushEstado = esIOS() && !instalada() ? "ios" : "no"; render(); return; }
+    var perm = await Notification.requestPermission();
+    if (perm !== "granted") { pushEstado = perm === "denied" ? "bloqueado" : "off"; render(); return toast("Sin permiso no te podemos avisar. Puedes activarlo cuando quieras.", 4500); }
+    var reg = await navigator.serviceWorker.register("sw.js");
+    await navigator.serviceWorker.ready;
+    var sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      var clave = await claveVapid();
+      try { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(clave) }); }
+      catch (e) { throw new Error("no_se_pudo_suscribir"); }
+    }
+    await guardarSuscripcion(sub);
+    pushEstado = "activo"; save("avisosNo", false);
+    toast("🔔 Avisos activados en este móvil", 4000);
+    render();
+  }
+  async function desactivarPush() {
+    var reg = await navigator.serviceWorker.getRegistration();
+    var sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { await db.rpc("push_desuscribir", { p_endpoint: sub.endpoint }); await sub.unsubscribe(); }
+    pushEstado = "off"; toast("Avisos desactivados en este móvil"); render();
+  }
+  function avisarYa() {   // manda ya los avisos pendientes (si no, salen en menos de 1 minuto)
+    try { db.functions.invoke("avisos", { body: {} }).catch(function () {}); } catch (e) {}
+  }
+  function tarjetaAvisos(enUsuarios) {
+    var que = 'Te avisamos al móvil cuando proponen un reto, <b>30 minutos antes</b> de que empiece, cuando empieza y cuando termina.';
+    if (pushEstado === "activo") return enUsuarios ? '<section class="card avisos-card on"><h2>🔔 Avisos activados</h2><p class="sub">' + que + '</p>' +
+      '<button class="btn small ghost" data-push="off">Desactivar en este móvil</button></section>' : "";
+    if (!enUsuarios && load("avisosNo")) return "";
+    if (pushEstado === "ios") return '<section class="card avisos-card"><h2>🔔 Avisos en iPhone</h2><p class="sub">' + que + '</p>' +
+      '<ol class="pasos"><li>Abre este juego en <b>Safari</b>.</li><li>Toca <b>Compartir</b> (el cuadrado con la flecha ⬆️).</li>' +
+      '<li>Elige <b>«Añadir a pantalla de inicio»</b>.</li><li>Abre el juego desde ese icono y toca <b>Activar avisos</b>.</li></ol>' +
+      (enUsuarios ? "" : '<button class="btn small ghost" data-push="no">Ahora no</button>') + '</section>';
+    if (pushEstado === "bloqueado") return '<section class="card avisos-card"><h2>🔕 Avisos bloqueados</h2><p class="sub">Este móvil tiene bloqueadas las notificaciones del juego. ' +
+      'Para activarlas toca el candado 🔒 junto a la dirección (o Ajustes del navegador → Notificaciones) y permite las notificaciones; luego recarga.</p>' +
+      (enUsuarios ? "" : '<button class="btn small ghost" data-push="no">Entendido</button>') + '</section>';
+    if (pushEstado === "off") return '<section class="card avisos-card"><h2>🔔 Activa los avisos</h2><p class="sub">' + que + '</p>' +
+      '<div class="row"><button class="btn primary" data-push="on">Activar avisos</button>' +
+      (enUsuarios ? "" : '<button class="btn ghost" data-push="no">Ahora no</button>') + '</div></section>';
+    return enUsuarios ? '<section class="card avisos-card"><h2>🔕 Sin avisos</h2><p class="sub">Este navegador no permite notificaciones. Prueba con Chrome (Android) o Safari (iPhone).</p></section>' : "";
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-push]"); if (!b) return;
+    var a = b.dataset.push;
+    if (a === "no") { save("avisosNo", true); render(); return; }
+    guard(async function () { if (a === "on") await activarPush(); else await desactivarPush(); });
+  });
+
+  // ---- Recordatorios por WhatsApp (con un toque) antes de que empiece un reto
+  function textoProgramado(r) {
+    var juez = user(juezDe(r)), t = r.torneo_id ? nombreTorneo(r.torneo_id) : null;
+    return "⏰ *Pronto empieza un reto" + (t ? " del torneo " + t : "") + "*\n\n" +
+      r.emoji + " Gana el primero en conseguir *" + r.meta + (r.meta === 1 ? " foto" : " fotos") + "* de: *" + r.que_buscar + "*\n" +
+      "🕒 Empieza: *" + fmtDate(r.inicia_en) + "* · dura " + duracionTxt(r) + "\n" +
+      "⚖️ Juez: " + juez.nombre + "\n" +
+      "👥 Compiten: " + competidores(r).map(function (u) { return u.nombre; }).join(", ") + "\n\n" +
+      "¡Prepárense! Entra aquí 👇\n" + gameUrl(r);
+  }
+  function textoPropuesta(r) {
+    return "🗳️ *Propuse un reto en el torneo " + nombreTorneo(r.torneo_id) + "*\n\n" +
+      r.emoji + " " + r.meta + (r.meta === 1 ? " foto" : " fotos") + " de: *" + r.que_buscar + "*\n" +
+      "⚖️ Juez: " + user(juezDe(r)).nombre + " · dura " + duracionTxt(r) + "\n\n" +
+      "Necesita *" + VOTOS_TORNEO + " votos a favor* en 24 horas o se elimina. ¡Vota aquí! 👇\n" + gameUrl(r);
+  }
+  function recordatoriosWA() {
+    var lim = Date.now() + 24 * 3600 * 1000;
+    var prox = data.retos.filter(function (r) {
+      return r.estado === "programado" && new Date(r.inicia_en) <= lim && (r.creado_por === me.id || juezDe(r) === me.id);
+    }).sort(function (a, b) { return new Date(a.inicia_en) - new Date(b.inicia_en); });
+    if (!prox.length) return "";
+    return '<section class="card recordatorio"><h2>📣 Pronto empieza</h2><ul class="recordatorios">' + prox.map(function (r) {
+      return '<li><button class="hist-item" data-open="' + r.id + '"><span>' + esc(r.emoji + " " + r.que_buscar) +
+        '<small>Empieza ' + fmtDate(r.inicia_en) + ' · ' + (juezDe(r) === me.id ? "eres el juez" : "lo propusiste") + '</small></span><span>Ver ›</span></button>' +
+        waButton(textoProgramado(r), "Avisar al grupo por WhatsApp", "wide ghost-wa") + '</li>';
+    }).join("") + '</ul></section>';
+  }
+
   // ============================================================ TORNEOS
   var VOTOS_TORNEO = 5;
   // Fechas del torneo (AAAA-MM-DD) en la zona horaria del juego
@@ -1595,7 +1715,8 @@
           '<div class="pueblo-bar"><i style="width:' + Math.min(100, n / VOTOS_TORNEO * 100) + '%"></i></div>' +
           '<small>' + n + ' / ' + VOTOS_TORNEO + ' votos a favor · se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega</small>' +
           (soy && me && r.creado_por !== me.id ? '<button class="btn small vote' + (mio ? " on" : "") + '" data-apoyo="' + r.id + '" data-v="' + (mio ? 0 : 1) + '">' + (mio ? "✓ Lo apoyas · quitar" : "👍 Apoyar este reto") + '</button>' : "") +
-          (me && r.creado_por === me.id ? '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") +
+          (me && r.creado_por === me.id ? waButton(textoPropuesta(r), "Pedir votos por WhatsApp", "small ghost-wa") +
+            '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") +
           (n ? '<small>Votaron a favor: ' + esc(vs.map(function (v) { return user(v.usuario_id).nombre; }).join(", ")) + '</small>' : "") +
           '<button class="link-btn" data-reto="' + r.id + '">Ver configuración ›</button></li>';
       }).join("") + '</ul>' : "") +
@@ -1639,6 +1760,7 @@
         guard(async function () {
           var res = must(await db.rpc("votar_propuesta", { p_token: token, p_reto: b.dataset.apoyo, p_si: b.dataset.v === "1" }));
           if (res.aprobado) {
+            avisarYa();
             toast(res.estado === "activo" ? "🎉 ¡Reto aprobado! Empieza ahora." : "🎉 ¡Reto aprobado! Empieza el " + fmtDate(res.inicia_en) + " (1 reto por día).", 5000);
             confetti();
           } else toast("🗳️ " + res.votos + " / " + VOTOS_TORNEO + " votos a favor");

@@ -38,6 +38,12 @@ Tres módulos (pestañas abajo de la cabecera):
   en los demás juega normal. Libertad anticipada: el administrador o el juez que lo encarceló.
 - **🗳️ Libertad por el pueblo:** el preso puede poner su caso a votación una vez por condena (dura 1 hora). Votan todos
   menos el preso y quien lo encarceló. Con 5 votos a favor sale libre; si no, sigue preso.
+- **🔔 Avisos al móvil:** cada jugador toca «Activar avisos» (en Retos o Usuarios) y recibe notificaciones automáticas:
+  reto propuesto en su torneo (¡a votar!), **30 minutos antes** de que empiece un reto programado, cuando empieza y cuando
+  termina. Funciona en Android (Chrome) y en iPhone si el juego se añade a la pantalla de inicio. Lo envía la función de
+  servidor `supabase/functions/avisos`, que pg_cron llama cada minuto.
+- **📣 Recordatorio por WhatsApp:** quien propuso un reto o su juez ve «Pronto empieza» con el botón «Avisar al grupo por
+  WhatsApp» (mensaje ya escrito con hora, juez y participantes). El autor de una propuesta tiene «Pedir votos por WhatsApp».
 - **🛡️ Administrador:** con clave (inicial **1234**, cámbiala en el panel). Elimina usuarios y retos y restablece claves.
 
 Puntos de cada reto: 1.º 3 pts, 2.º 2 pts y 3.º 1 pt. Si se acaba el tiempo, gana quien tenga más fotos aceptadas.
