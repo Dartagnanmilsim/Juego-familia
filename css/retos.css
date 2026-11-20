@@ -585,3 +585,15 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .row.fechas { gap: 10px; }
 .row.fechas label { flex: 1; display: grid; gap: 4px; min-width: 0; }
 .row.fechas input { width: 100%; min-width: 0; }
+
+/* ---------- Ficha de configuración del reto ---------- */
+.ficha { margin: 14px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 14px; text-align: left; }
+.ficha summary { font-weight: 700; cursor: pointer; }
+.ficha dl { margin: 10px 0 0; display: grid; gap: 10px; }
+.ficha dl > div { display: grid; grid-template-columns: 9.5em 1fr; gap: 8px; align-items: start; }
+.ficha dt { color: var(--muted); font-size: 13px; }
+.ficha dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ficha-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ficha-chip { padding: 2px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+.link-btn { justify-self: start; background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+@media (max-width: 380px) { .ficha dl > div { grid-template-columns: 1fr; gap: 2px; } }

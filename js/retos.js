@@ -517,11 +517,57 @@
     var r = sel && retoById(sel);
     var html;
     if (creating) html = renderNewForm();
-    else if (r) html = '<button class="btn ghost back-btn" id="backList">← Todos los retos</button>' + (r.estado === "activo" ? renderActive(r) : renderFinished(r));
+    else if (r) html = '<button class="btn ghost back-btn" id="backList">← ' + (desdeTorneo ? "Volver al torneo" : "Todos los retos") + '</button>' +
+      (r.estado === "activo" ? renderActive(r) : r.estado === "propuesto" || r.estado === "programado" ? renderPendiente(r) : renderFinished(r));
     else html = renderList() + renderRanking() + renderHistory();
     $app.innerHTML = html;
     bindGame(r);
     updateClock();
+  }
+
+  // ------------------------------------------------------------ ficha (configuración) de un reto
+  var desdeTorneo = false;   // se abrió el reto desde la pestaña Torneos
+  function duracionTxt(r) {
+    var min = r.duracion_min || Math.round((new Date(r.termina_en) - new Date(r.inicia_en)) / 60000);
+    var d = DURATIONS.filter(function (x) { return x.min === min; })[0];
+    if (d) return d.label;
+    if (min % 1440 === 0) return (min / 1440) + " días";
+    if (min % 60 === 0) return (min / 60) + " horas";
+    return min + " min";
+  }
+  function nombres(ids) {
+    return ids.map(function (id) { var u = user(id); return '<span class="ficha-chip">' + esc(u.avatar + " " + u.nombre) + '</span>'; }).join("");
+  }
+  function fichaReto(r, abierta) {
+    var juez = user(juezDe(r)), votos = votosDeReto(r.id).slice().sort(function (a, b) { return new Date(a.creado_en) - new Date(b.creado_en); });
+    var comp = competidores(r).map(function (u) { return u.id; });
+    var horario = r.estado === "propuesto"
+      ? '<span class="muted">Se fija cuando tenga ' + VOTOS_TORNEO + ' votos</span>'
+      : 'Desde <b>' + fmtDate(r.inicia_en) + '</b><br>hasta <b>' + fmtDate(r.termina_en) + '</b>' +
+        (r.cerrado_en && new Date(r.cerrado_en) < new Date(r.termina_en) - 60000 ? '<br><small>Terminó antes, el ' + fmtDate(r.cerrado_en) + (r.motivo === "meta" ? " (alguien llegó a la meta)" : "") + '</small>' : "");
+    var filas = [
+      r.torneo_id ? ["🏆 Torneo", esc(nombreTorneo(r.torneo_id))] : null,
+      ["🎯 Reto", r.meta + " fotos aceptadas de " + esc(r.que_buscar)],
+      ["✍️ " + (r.torneo_id ? "Lo propuso" : "Lo creó"), esc(user(r.creado_por).avatar + " " + user(r.creado_por).nombre)],
+      ["⚖️ Juez", esc(juez.avatar + " " + juez.nombre)],
+      ["⏱️ Duración", duracionTxt(r)],
+      ["🕒 Horario", horario],
+      r.torneo_id ? ["🗳️ Votos a favor", (votos.length ? votos.length + " / " + VOTOS_TORNEO + '<div class="ficha-chips">' + nombres(votos.map(function (v) { return v.usuario_id; })) + '</div>'
+        : '<span class="muted">Ninguno todavía</span>')] : null,
+      ["👥 Compiten (" + comp.length + ")", '<div class="ficha-chips">' + nombres(comp) + '</div>']
+    ].filter(Boolean);
+    return '<details class="ficha"' + (abierta ? " open" : "") + '><summary>⚙️ Configuración del reto</summary><dl>' +
+      filas.map(function (f) { return '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>'; }).join("") + '</dl></details>';
+  }
+  function renderPendiente(r) {   // reto de torneo en votación o programado
+    var vs = votosDeReto(r.id).length;
+    return '<section class="card">' +
+      '<div class="tag' + (r.estado === "programado" ? " live" : "") + '">' + ESTADOS[r.estado] + '</div>' +
+      '<div class="big-emoji">' + esc(r.emoji) + '</div>' +
+      '<h2>' + r.meta + ' fotos de: ' + esc(r.que_buscar) + '</h2>' +
+      '<p class="sub">' + (r.estado === "programado" ? "Aprobado. Empieza el <b>" + fmtDate(r.inicia_en) + "</b>."
+        : "En votación: " + vs + " / " + VOTOS_TORNEO + ' votos. Se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega.') + '</p>' +
+      fichaReto(r, true) + '</section>';
   }
 
   function rolBadge(r) {
@@ -643,6 +689,7 @@
           '<span class="n">' + x.ok + "/" + r.meta + (x.pend ? ' <small>+' + x.pend + ' pend.</small>' : "") +
           (soyJuez && !presoDe(u.id, r.id) ? ' <button class="jail-btn" data-jail="' + u.id + '" title="Mandar al calabozo" aria-label="Mandar al calabozo a ' + esc(u.nombre) + '">🚔</button>' : "") + '</span></li>';
       }).join("") + '</ul>' +
+      fichaReto(r, false) +
       '</section>' +
       (justCreated === r.id ? "" : '<div class="wa-row">' + waButton(textoReto(r, false), "Recordar por WhatsApp", "ghost-wa") + '</div>') +
       '<section class="card"><h2>Fotos <span class="count">' + fotos.length + '</span></h2>' +
@@ -669,7 +716,7 @@
         return '<li><span class="pos">' + p.puesto + '</span><span class="who">' + esc(u.avatar + " " + u.nombre) + '</span>' +
           '<span class="wins">' + p.fotos + ' fotos</span><span class="pts">+' + p.puntos + ' pts</span></li>';
       }).join("") + '</ol>' : "") +
-      '<p class="sub">Juez: ' + esc(user(juezDe(r)).nombre) + '</p>' +
+      fichaReto(r, !!r.torneo_id) +
       (fotos.length ? '<div class="gallery">' + fotos.map(thumb).join("") + '</div>' : "") +
       (r.estado === "terminado" ? waButton(textoResultado(r), "Compartir resultado por WhatsApp", "wide") : "") +
       '</section>';
@@ -777,6 +824,7 @@
 
   function openReto(id) { sel = id; creating = false; window.scrollTo(0, 0); reload(); render(); }
   function backToList() {
+    if (desdeTorneo && !creating) { desdeTorneo = false; sel = null; view = "podio"; render(); window.scrollTo(0, 0); return; }
     if (creating && draft.torneo) { draft.torneo = null; creating = false; view = "podio"; render(); window.scrollTo(0, 0); return; }
     sel = null; creating = false; justCreated = null; render(); window.scrollTo(0, 0);
   }
@@ -1547,11 +1595,14 @@
           '<div class="pueblo-bar"><i style="width:' + Math.min(100, n / VOTOS_TORNEO * 100) + '%"></i></div>' +
           '<small>' + n + ' / ' + VOTOS_TORNEO + ' votos a favor · se elimina en <span data-cierra="' + r.propuesta_expira + '"></span> si no llega</small>' +
           (soy && me && r.creado_por !== me.id ? '<button class="btn small vote' + (mio ? " on" : "") + '" data-apoyo="' + r.id + '" data-v="' + (mio ? 0 : 1) + '">' + (mio ? "✓ Lo apoyas · quitar" : "👍 Apoyar este reto") + '</button>' : "") +
-          (me && r.creado_por === me.id ? '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") + '</li>';
+          (me && r.creado_por === me.id ? '<button class="btn small ghost" data-retirar="' + r.id + '">Retirar mi propuesta</button>' : "") +
+          (n ? '<small>Votaron a favor: ' + esc(vs.map(function (v) { return user(v.usuario_id).nombre; }).join(", ")) + '</small>' : "") +
+          '<button class="link-btn" data-reto="' + r.id + '">Ver configuración ›</button></li>';
       }).join("") + '</ul>' : "") +
       // programados y jugados
       (programados.length ? '<h3>📅 Programados</h3><ul class="camp-retos">' + programados.map(function (r) {
-        return '<li><span class="hist-item"><span>' + esc(r.emoji + " " + r.que_buscar) + '<small>Empieza ' + fmtDate(r.inicia_en) + '</small></span><span>Programado</span></span></li>';
+        return '<li><button class="hist-item" data-reto="' + r.id + '"><span>' + esc(r.emoji + " " + r.que_buscar) + '<small>Empieza ' + fmtDate(r.inicia_en) +
+          ' · juez ' + esc(user(juezDe(r)).nombre) + '</small></span><span>Ver ›</span></button></li>';
       }).join("") + '</ul>' : "") +
       '<h3>Podio</h3>' + podium +
       (tb.filas.length ? '<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th>' +
@@ -1574,7 +1625,7 @@
 
   function bindTorneos() {
     $app.querySelectorAll("[data-reto]").forEach(function (b) {
-      b.onclick = function () { view = "retos"; sel = b.dataset.reto; creating = false; reload(); render(); window.scrollTo(0, 0); };
+      b.onclick = function () { view = "retos"; sel = b.dataset.reto; creating = false; desdeTorneo = true; reload(); render(); window.scrollTo(0, 0); };
     });
     $app.querySelectorAll("[data-proponer]").forEach(function (b) {
       b.onclick = function () {
